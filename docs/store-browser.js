@@ -99,5 +99,47 @@
     async update(tab, keyField, key, patch) { const d = this.mem || this._load(); const r = d[tab].find(x => String(x[keyField]) === String(key)); Object.assign(r, patch); this._save(d); return r; }
   }
 
-  window.createBrowserStore = cfg => (cfg.CLIENT_ID && cfg.SHEET_ID ? new SheetsBrowser(cfg.SHEET_ID, cfg.CLIENT_ID) : new DemoStore());
+
+  // อ่านผ่าน Apps Script (ไม่ต้องล็อกอิน) — เขียนต้องใช้ PIN
+  class AppsScriptStore {
+    constructor(url) { this.url = url; this.pin = (() => { try { return localStorage.getItem('pin') || ''; } catch { return ''; } })(); }
+    get demo() { return false; }
+    get signedIn() { return true; }
+    get canEdit() { return !!this.pin; }
+    async signIn() {}
+    async init() {}
+    _savePin(p) { this.pin = p; try { p ? localStorage.setItem('pin', p) : localStorage.removeItem('pin'); } catch {} }
+    async _call(body) {
+      const res = await fetch(this.url, { method: 'POST', body: JSON.stringify(body) });
+      if (!res.ok) throw new Error('เชื่อมต่อไม่สำเร็จ (' + res.status + ')');
+      return res.json();
+    }
+    async loadAll() {
+      const res = await fetch(this.url + '?action=load&t=' + Date.now());
+      const j = await res.json();
+      if (!j.ok) throw new Error(j.error || 'โหลดข้อมูลไม่สำเร็จ');
+      const d = j.data; for (const t of ['Tasks', 'Logs', 'Snapshots', 'People', 'Categories']) d[t] = d[t] || [];
+      return d;
+    }
+    async askPin(force) {
+      if (this.pin && !force) return true;
+      const p = prompt('ใส่รหัส PIN เพื่อแก้ไขข้อมูล');
+      if (!p) return false;
+      const j = await this._call({ action: 'checkPin', pin: p.trim() });
+      if (!j.ok) { alert(j.error || 'PIN ไม่ถูกต้อง'); return false; }
+      this._savePin(p.trim()); window.dispatchEvent(new Event('pinchange')); return true;
+    }
+    logout() { this._savePin(''); window.dispatchEvent(new Event('pinchange')); }
+    async _write(body) {
+      if (!(await this.askPin())) throw new Error('ต้องใส่ PIN ก่อนแก้ไข');
+      let j = await this._call({ ...body, pin: this.pin });
+      if (!j.ok && j.code === 401) { this._savePin(''); if (!(await this.askPin(true))) throw new Error('PIN ไม่ถูกต้อง'); j = await this._call({ ...body, pin: this.pin }); }
+      if (!j.ok) throw new Error(j.error || 'บันทึกไม่สำเร็จ');
+      return j;
+    }
+    async append(tab, obj) { await this._write({ action: 'append', tab, obj }); }
+    async update(tab, keyField, key, patch) { return (await this._write({ action: 'update', tab, keyField, key, patch })).row; }
+  }
+
+  window.createBrowserStore = cfg => (cfg.APPS_SCRIPT_URL ? new AppsScriptStore(cfg.APPS_SCRIPT_URL) : cfg.CLIENT_ID && cfg.SHEET_ID ? new SheetsBrowser(cfg.SHEET_ID, cfg.CLIENT_ID) : new DemoStore());
 })();

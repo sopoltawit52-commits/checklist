@@ -355,5 +355,17 @@ $('#signinBtn').onclick = async () => {
 };
 document.querySelectorAll('nav button').forEach(b => (b.onclick = () => show(b.dataset.v)));
 $('#demoBanner').classList.toggle('hidden', !store.demo);
+function renderPin() {
+  if (!('canEdit' in store)) return;
+  const b = $('#pinBtn'); b.classList.remove('hidden');
+  b.textContent = store.canEdit ? '🔓 แก้ไขได้' : '🔒 ดูอย่างเดียว';
+  b.title = store.canEdit ? 'กดเพื่อออกจากโหมดแก้ไข' : 'กดเพื่อใส่ PIN';
+}
+$('#pinBtn').onclick = async () => {
+  if (store.canEdit) { if (confirm('ออกจากโหมดแก้ไข (ลบ PIN ที่จำไว้ในเครื่องนี้)?')) store.logout(); }
+  else { try { if (await store.askPin(true)) toast('🔓 แก้ไขได้แล้ว'); } catch (e) { toast(e.message); } }
+};
+window.addEventListener('pinchange', renderPin);
+renderPin();
 show(ls.get('view') || 'today');
 setInterval(() => { if (!$('#v-today').classList.contains('hidden') && store.signedIn) loadToday().catch(() => {}); }, 60000);
