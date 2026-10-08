@@ -36,6 +36,11 @@
       });
     }
     ['T-001', 'T-002', 'T-004'].forEach((id, k) => { const t = T.find(x => x.id === id); logs.push({ log_id: `L-today-${k}`, date: d, time: `0${7 + k}:5${k}`, task_id: id, title: t.title, owner: t.owner, done_by: t.owner, type: 'daily', note: '', void: '' }); });
-    return { Tasks: T, Logs: logs, Snapshots: [], Meta: [] };
+    const ts = start + ' 08:00:00';
+    const People = [['สมชาย', 'ช่างซ่อมบำรุง'], ['วิชัย', 'ช่างไฟฟ้า/PLC'], ['นภา', 'QC'], ['อรุณ', 'หัวหน้างาน']]
+      .map(([name, position], i) => ({ id: 'P-' + (i + 1), name, position, phone: '', note: '', active: 'Y', created_at: ts }));
+    const COLORS = ['#2563eb', '#16a34a', '#d97706', '#dc2626', '#7c3aed', '#0891b2', '#db2777', '#65a30d', '#475569'];
+    const Categories = [...new Set(T.map(t => t.category))].map((name, i) => ({ id: 'C-' + (i + 1), name, color: COLORS[i % COLORS.length], note: '', active: 'Y', created_at: ts }));
+    return { Tasks: T, Logs: logs, Snapshots: [], Meta: [], People, Categories };
   };
 });

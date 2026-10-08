@@ -111,6 +111,14 @@ pre.preview{white-space:pre-wrap;background:var(--bg);border-radius:10px;padding
 .tag.time{background:var(--info-soft);color:var(--info);font-weight:600}
 .row2{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .hint{font-size:12px;color:var(--muted);margin-top:4px}
+.iform{display:grid;grid-template-columns:1.4fr 1.4fr 1fr auto auto;gap:8px;margin-bottom:10px;align-items:center}
+.iform input[type=color]{padding:2px;height:40px;min-width:48px}
+@media (max-width:620px){.iform{grid-template-columns:1fr 1fr}.iform input[name=name]{grid-column:1/-1}}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:middle}
+.mlink{float:right;font-size:12px;color:var(--info);text-decoration:none}
+select{appearance:auto}
+.muted{color:var(--muted);font-size:12px}
+details.card>summary{cursor:pointer;color:var(--muted);font-size:14px}
 </style>
 </head>
 <body>
@@ -207,14 +215,13 @@ pre.preview{white-space:pre-wrap;background:var(--bg);border-radius:10px;padding
               <option value="0">ตรงเวลา</option><option value="15">15 นาทีก่อน</option><option value="30" selected>30 นาทีก่อน</option>
               <option value="60">1 ชั่วโมงก่อน</option><option value="120">2 ชั่วโมงก่อน</option><option value="none">ไม่ต้องเตือน</option>
             </select></div>
-          <div><label>ผู้รับผิดชอบ</label><input name="owner" list="ownerList" placeholder="ชื่อ"></div>
+          <div><label>ผู้รับผิดชอบ <a href="#" class="mlink" data-goto="master">จัดการรายชื่อ</a></label><select name="owner"></select></div>
           <div><label>ความสำคัญ</label><select name="priority"><option>สูง</option><option selected>กลาง</option><option>ต่ำ</option></select></div>
-          <div><label>หมวดหมู่</label><input name="category" list="catList" placeholder="เช่น ซ่อมบำรุง, QC"></div>
+          <div><label>กลุ่มงาน <a href="#" class="mlink" data-goto="master">จัดการกลุ่มงาน</a></label><select name="category"></select></div>
           <div class="full"><label>หมายเหตุ (แสดงในข้อความเตือน)</label><textarea name="note" rows="2" placeholder="เช่น สถานที่ / เบอร์ติดต่อ"></textarea></div>
           <div class="full row2"><button class="btn" type="submit" id="saveBtn">บันทึกงาน</button><button class="btn ghost hidden" type="button" id="cancelEdit">ยกเลิกการแก้ไข</button></div>
         </div>
       </form>
-      <datalist id="ownerList"></datalist><datalist id="catList"></datalist>
     </div>
   </section>
 
@@ -233,6 +240,36 @@ pre.preview{white-space:pre-wrap;background:var(--bg);border-radius:10px;padding
       <pre class="preview" id="preview"></pre>
     </div>
   </section>
+  <!-- ===== ข้อมูลหลัก ===== -->
+  <section id="v-master" class="hidden">
+    <div class="card">
+      <h2>👥 รายชื่อผู้รับผิดชอบ <span class="sub" id="pCount"></span></h2>
+      <form id="pForm" class="iform" autocomplete="off">
+        <input type="hidden" name="rid">
+        <input name="name" placeholder="ชื่อ *" required maxlength="60">
+        <input name="position" placeholder="ตำแหน่ง / แผนก" maxlength="60">
+        <input name="phone" placeholder="เบอร์โทร" maxlength="30">
+        <button class="btn" type="submit">เพิ่ม</button>
+        <button class="btn ghost hidden" type="button" data-cancel="p">ยกเลิก</button>
+      </form>
+      <table class="mtable"><tbody id="pBody"></tbody></table>
+      <button class="btn ghost sm hidden" id="importPeople" type="button">นำเข้ารายชื่อจากงานที่มีอยู่</button>
+    </div>
+    <div class="card">
+      <h2>🏷️ กลุ่มงาน <span class="sub" id="cCount"></span></h2>
+      <form id="cForm" class="iform" autocomplete="off">
+        <input type="hidden" name="rid">
+        <input name="name" placeholder="ชื่อกลุ่มงาน *" required maxlength="60">
+        <input name="note" placeholder="คำอธิบาย" maxlength="100">
+        <input name="color" type="color" value="#2563eb" title="สี">
+        <button class="btn" type="submit">เพิ่ม</button>
+        <button class="btn ghost hidden" type="button" data-cancel="c">ยกเลิก</button>
+      </form>
+      <table class="mtable"><tbody id="cBody"></tbody></table>
+      <button class="btn ghost sm hidden" id="importCats" type="button">นำเข้ากลุ่มงานจากงานที่มีอยู่</button>
+    </div>
+    <details class="card"><summary>แสดงรายการที่ลบแล้ว</summary><div id="deletedList" style="margin-top:8px"></div></details>
+  </section>
 </main>
 
 <nav id="nav">
@@ -240,6 +277,7 @@ pre.preview{white-space:pre-wrap;background:var(--bg);border-radius:10px;padding
   <button data-v="history"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>ประวัติ</button>
   <button data-v="add"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>เพิ่มงาน</button>
   <button data-v="manage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/></svg>จัดการ</button>
+  <button data-v="master"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.8c1.9.7 3.1 2.5 3.5 5.2"/></svg>ข้อมูลหลัก</button>
 </nav>
 <div class="toast" id="toast"></div>
 

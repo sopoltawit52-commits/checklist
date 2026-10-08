@@ -11,6 +11,8 @@
     Logs: ['log_id', 'date', 'time', 'task_id', 'title', 'owner', 'done_by', 'type', 'note', 'void'],
     Snapshots: ['date', 'planned', 'done', 'pct', 'by_owner_json'],
     Meta: ['key', 'value'],
+    People: ['id', 'name', 'position', 'phone', 'note', 'active', 'created_at'],
+    Categories: ['id', 'name', 'color', 'note', 'active', 'created_at'],
   };
 
   // ---------------------------------------------------------------- วันที่ / เวลา (เวลาไทยเสมอ)

@@ -17,6 +17,8 @@ const colorFor = p => (p >= TARGET ? 'var(--brand)' : p >= 50 ? 'var(--warn)' : 
 const thDate = (d, o = { weekday: 'short', day: 'numeric', month: 'short' }) => new Date(d + 'T00:00:00').toLocaleDateString('th-TH', o);
 const fmtDue = d => (d ? thDate(L.normDate(d), { day: 'numeric', month: 'short' }) : '');
 const nowMin = () => L.toMin(L.nowParts().time);
+const activeRows = rows => (rows || []).filter(r => r.active !== 'N');
+const catDot = name => { const c = (DATA && activeRows(DATA.Categories).find(x => x.name === name)) || null; return c && c.color ? `<i class="dot" style="background:${esc(c.color)}"></i>` : '· '; };
 
 async function refresh() {
   if (!inited) { await store.init(); inited = true; }
@@ -41,7 +43,7 @@ function taskRow(t, mode) {
   tags.push(t.type === 'daily' ? '<span class="tag daily">ประจำวัน</span>' : '<span class="tag">ครั้งเดียว</span>');
   if (t.priority === 'สูง') tags.push('<span class="tag high">สำคัญสูง</span>');
   if (t.owner) tags.push(`<span>👤 ${esc(t.owner)}</span>`);
-  if (t.category) tags.push(`<span>· ${esc(t.category)}</span>`);
+  if (t.category) tags.push(`<span>${catDot(t.category)}${esc(t.category)}</span>`);
   if (mode === 'done') tags.push(`<span class="tag ok">✓ ${esc(t.done_time || '')}${t.done_by ? ' โดย ' + esc(t.done_by) : ''}</span>`);
   const cb = mode === 'up' ? '' : `<button class="cb" aria-label="${mode === 'done' ? 'ยกเลิกเสร็จ' : 'ทำเสร็จ'}" data-id="${t.id}" data-act="${mode === 'done' ? 'undo' : 'done'}"></button>`;
   return `<div class="task ${mode === 'done' ? 'done' : ''}">${cb}<div class="body"><div class="title">${esc(t.title)}</div><div class="meta">${tags.join('')}</div>${t.note ? `<div class="meta">📝 ${esc(t.note)}</div>` : ''}</div></div>`;
@@ -117,11 +119,20 @@ async function loadHistory() {
 }
 
 // ---------------------------------------------------------------- เพิ่ม / แก้ไข
-function fillLists(Tasks) {
-  $('#ownerList').innerHTML = [...new Set(Tasks.map(t => t.owner).filter(Boolean))].map(o => `<option value="${esc(o)}">`).join('');
-  $('#catList').innerHTML = [...new Set(Tasks.map(t => t.category).filter(Boolean))].map(o => `<option value="${esc(o)}">`).join('');
+function fillLists() {
+  const people = activeRows(DATA.People).sort((a, b) => a.name.localeCompare(b.name, 'th'));
+  const cats = activeRows(DATA.Categories).sort((a, b) => a.name.localeCompare(b.name, 'th'));
+  const f = $('#addForm');
+  const setOpts = (sel, items, empty, label) => {
+    const cur = sel.value;
+    sel.innerHTML = `<option value="">${empty}</option>` + items.map(i => `<option value="${esc(i.name)}">${esc(label(i))}</option>`).join('');
+    if (cur && ![...sel.options].some(o => o.value === cur)) sel.insertAdjacentHTML('beforeend', `<option value="${esc(cur)}">${esc(cur)} (ไม่อยู่ในรายชื่อ)</option>`);
+    sel.value = cur;
+  };
+  setOpts(f.elements['owner'], people, people.length ? '— เลือกผู้รับผิดชอบ —' : '— ยังไม่มีรายชื่อ (เพิ่มที่ ข้อมูลหลัก) —', p => p.position ? `${p.name} (${p.position})` : p.name);
+  setOpts(f.elements['category'], cats, cats.length ? '— เลือกกลุ่มงาน —' : '— ยังไม่มีกลุ่มงาน (เพิ่มที่ ข้อมูลหลัก) —', c => c.name);
 }
-async function loadAdd() { fillLists((await refresh()).Tasks); }
+async function loadAdd() { await refresh(); fillLists(); }
 function resetForm() {
   const f = $('#addForm'); f.reset(); f.elements['task_id'].value = '';
   $('#formTitle').textContent = '➕ เพิ่มรายการงาน'; $('#saveBtn').textContent = 'บันทึกงาน';
@@ -132,6 +143,8 @@ function editTask(id) {
   const t = DATA.Tasks.find(x => x.id === id); if (!t) return;
   show('add', true);
   const f = $('#addForm');
+  fillLists();
+  for (const [k, v] of [['owner', t.owner], ['category', t.category]]) { const sel = f.elements[k]; if (v && ![...sel.options].some(o => o.value === v)) sel.insertAdjacentHTML('beforeend', `<option value="${esc(v)}">${esc(v)}</option>`); }
   f.elements['task_id'].value = t.id; f.elements['title'].value = t.title; f.elements['owner'].value = t.owner; f.elements['category'].value = t.category; f.elements['priority'].value = t.priority || 'กลาง';
   f.querySelector(`[name=type][value=${t.type === 'daily' ? 'daily' : 'once'}]`).checked = true;
   f.elements['due_date'].value = L.normDate(t.due_date); f.elements['time'].value = L.normTime(t.time); f.elements['remind_before'].value = t.remind_before || '30'; f.elements['note'].value = t.note;
@@ -166,7 +179,6 @@ $('#addForm').addEventListener('submit', async e => {
 // ---------------------------------------------------------------- จัดการ
 async function loadManage() {
   const { Tasks, Logs } = await refresh();
-  fillLists(Tasks);
   const list = Tasks.filter(t => (t.status || 'open') === mStatus)
     .sort((a, b) => (a.type === b.type ? 0 : a.type === 'daily' ? -1 : 1) || String(L.normDate(a.due_date) || '9').localeCompare(String(L.normDate(b.due_date) || '9')) || L.normTime(a.time).localeCompare(L.normTime(b.time)));
   $('#mBody').innerHTML = list.length ? list.map(t => `<tr><td><b>${esc(t.title)}</b><div class="meta"><span class="tag ${t.type === 'daily' ? 'daily' : ''}">${t.type === 'daily' ? 'ประจำวัน' : 'ครั้งเดียว'}</span>${t.time ? `<span class="tag time">🕐 ${esc(L.normTime(t.time))}</span>` : ''}${t.owner ? `<span>👤 ${esc(t.owner)}</span>` : ''}${t.due_date ? `<span>กำหนด ${fmtDue(t.due_date)}</span>` : ''}${t.done_at ? `<span>เสร็จ ${fmtDue(t.done_at)}</span>` : ''}</div></td>
@@ -196,10 +208,113 @@ document.addEventListener('click', async e => {
   }
 });
 
+
+// ---------------------------------------------------------------- ข้อมูลหลัก (รายชื่อ / กลุ่มงาน)
+const MASTER = {
+  p: { tab: 'People', field: 'owner', form: '#pForm', body: '#pBody', count: '#pCount', label: 'รายชื่อ', idp: 'P' },
+  c: { tab: 'Categories', field: 'category', form: '#cForm', body: '#cBody', count: '#cCount', label: 'กลุ่มงาน', idp: 'C' },
+};
+const usage = (field, name) => DATA.Tasks.filter(t => t[field] === name && t.status !== 'cancel').length;
+async function loadMaster() {
+  await refresh();
+  for (const k of ['p', 'c']) {
+    const m = MASTER[k];
+    const rows = activeRows(DATA[m.tab]).sort((a, b) => a.name.localeCompare(b.name, 'th'));
+    $(m.count).textContent = `${rows.length} รายการ`;
+    $(m.body).innerHTML = rows.length ? rows.map(r => `<tr><td>${k === 'c' ? `<i class="dot" style="background:${esc(r.color || '#999')}"></i>` : '👤 '}<b>${esc(r.name)}</b>
+      <div class="meta">${k === 'p' ? `${r.position ? `<span>${esc(r.position)}</span>` : ''}${r.phone ? `<span>📞 ${esc(r.phone)}</span>` : ''}` : (r.note ? `<span>${esc(r.note)}</span>` : '')}<span class="muted">ใช้ในงาน ${usage(m.field, r.name)} รายการ</span></div></td>
+      <td><button class="btn ghost sm" data-medit="${k}:${r.id}">แก้ไข</button> <button class="btn danger sm" data-mdel="${k}:${r.id}">ลบ</button></td></tr>`).join('')
+      : `<tr><td class="empty">ยังไม่มี${m.label} — กรอกด้านบนแล้วกด "เพิ่ม"</td></tr>`;
+    const names = new Set((DATA[m.tab] || []).map(r => r.name));
+    const fromTasks = [...new Set(DATA.Tasks.map(t => t[m.field]).filter(v => v && !names.has(v)))];
+    $(k === 'p' ? '#importPeople' : '#importCats').classList.toggle('hidden', !fromTasks.length);
+  }
+  const del = ['p', 'c'].flatMap(k => (DATA[MASTER[k].tab] || []).filter(r => r.active === 'N').map(r => ({ k, r })));
+  $('#deletedList').innerHTML = del.length ? del.map(({ k, r }) => `<div class="task"><div class="body">${k === 'p' ? '👤' : '🏷️'} ${esc(r.name)}</div><button class="btn ghost sm" data-mrestore="${k}:${r.id}">กู้คืน</button></div>`).join('') : '<div class="empty">ไม่มี</div>';
+}
+function resetMasterForm(k) {
+  const f = $(MASTER[k].form); f.reset(); f.elements['rid'].value = '';
+  f.querySelector('[type=submit]').textContent = 'เพิ่ม';
+  f.querySelector(`[data-cancel=${k}]`).classList.add('hidden');
+}
+for (const k of ['p', 'c']) {
+  $(MASTER[k].form).addEventListener('submit', async e => {
+    e.preventDefault();
+    const m = MASTER[k], f = e.target, fd = Object.fromEntries(new FormData(f));
+    const name = (fd.name || '').trim();
+    if (!name) return;
+    const btn = f.querySelector('[type=submit]'); btn.disabled = true;
+    try {
+      await refresh();
+      const dup = activeRows(DATA[m.tab]).find(r => r.name === name && r.id !== fd.rid);
+      if (dup) throw new Error(`มี "${name}" อยู่แล้ว`);
+      const data = k === 'p' ? { name, position: (fd.position || '').trim(), phone: (fd.phone || '').trim() } : { name, note: (fd.note || '').trim(), color: fd.color };
+      if (fd.rid) {
+        const oldName = (DATA[m.tab].find(r => r.id === fd.rid) || {}).name;
+        const affected = oldName && oldName !== name ? DATA.Tasks.filter(t => t[m.field] === oldName) : [];
+        await store.update(m.tab, 'id', fd.rid, data);
+        if (affected.length) {
+          if (confirm(`เปลี่ยนชื่อในงานที่ใช้ "${oldName}" อยู่ ${affected.length} รายการ เป็น "${name}" ด้วยไหม?`))
+            for (const t of affected) await store.update('Tasks', 'id', t.id, { [m.field]: name });
+        }
+        toast('✔ บันทึกการแก้ไขแล้ว');
+      } else {
+        const n = L.nowParts();
+        await store.append(m.tab, { id: L.newId(m.idp), ...data, active: 'Y', created_at: `${n.date} ${n.time}` });
+        toast(`✔ เพิ่ม${m.label}แล้ว`);
+      }
+      resetMasterForm(k); await loadMaster();
+    } catch (err) { toast('ผิดพลาด: ' + err.message); }
+    btn.disabled = false;
+  });
+}
+async function importFromTasks(k) {
+  const m = MASTER[k];
+  await refresh();
+  const names = new Set((DATA[m.tab] || []).map(r => r.name));
+  const list = [...new Set(DATA.Tasks.map(t => t[m.field]).filter(v => v && !names.has(v)))];
+  if (!list.length || !confirm(`นำเข้า ${list.length} รายการ: ${list.join(', ')} ?`)) return;
+  const n = L.nowParts(), COLORS = ['#2563eb', '#16a34a', '#d97706', '#dc2626', '#7c3aed', '#0891b2', '#db2777', '#65a30d'];
+  for (const [i, name] of list.entries())
+    await store.append(m.tab, k === 'p' ? { id: L.newId('P'), name, position: '', phone: '', note: '', active: 'Y', created_at: `${n.date} ${n.time}` }
+      : { id: L.newId('C'), name, color: COLORS[i % COLORS.length], note: '', active: 'Y', created_at: `${n.date} ${n.time}` });
+  toast(`✔ นำเข้า ${list.length} รายการแล้ว`); loadMaster();
+}
+$('#importPeople').onclick = () => importFromTasks('p').catch(e => toast(e.message));
+$('#importCats').onclick = () => importFromTasks('c').catch(e => toast(e.message));
+document.addEventListener('click', async e => {
+  const go = e.target.closest('[data-goto]'); if (go) { e.preventDefault(); show(go.dataset.goto); return; }
+  const cn = e.target.closest('[data-cancel]'); if (cn) { resetMasterForm(cn.dataset.cancel); return; }
+  const ed = e.target.closest('[data-medit]');
+  if (ed) {
+    const [k, id] = ed.dataset.medit.split(':'), m = MASTER[k], r = DATA[m.tab].find(x => x.id === id), f = $(m.form);
+    f.elements['rid'].value = r.id; f.elements['name'].value = r.name;
+    if (k === 'p') { f.elements['position'].value = r.position || ''; f.elements['phone'].value = r.phone || ''; }
+    else { f.elements['note'].value = r.note || ''; f.elements['color'].value = r.color || '#2563eb'; }
+    f.querySelector('[type=submit]').textContent = 'บันทึก';
+    f.querySelector(`[data-cancel=${k}]`).classList.remove('hidden');
+    f.scrollIntoView({ behavior: 'smooth', block: 'center' }); f.elements['name'].focus();
+    return;
+  }
+  const dl = e.target.closest('[data-mdel]');
+  if (dl) {
+    const [k, id] = dl.dataset.mdel.split(':'), m = MASTER[k], r = DATA[m.tab].find(x => x.id === id);
+    const used = usage(m.field, r.name);
+    if (!confirm(`ลบ "${r.name}"?${used ? `\n(มีงานที่ใช้อยู่ ${used} รายการ — งานเดิมยังคงชื่อนี้ไว้)` : ''}\nกู้คืนได้ที่ "แสดงรายการที่ลบแล้ว"`)) return;
+    try { await store.update(m.tab, 'id', id, { active: 'N' }); toast('ลบแล้ว'); loadMaster(); } catch (err) { toast(err.message); }
+    return;
+  }
+  const rs = e.target.closest('[data-mrestore]');
+  if (rs) {
+    const [k, id] = rs.dataset.mrestore.split(':');
+    try { await store.update(MASTER[k].tab, 'id', id, { active: 'Y' }); toast('กู้คืนแล้ว'); loadMaster(); } catch (err) { toast(err.message); }
+  }
+});
+
 // ---------------------------------------------------------------- ทั่วไป
 function askName() { const n = prompt('ชื่อของคุณ (ใช้บันทึกว่าใครเป็นคนทำงาน)', ME); if (n !== null) { ME = n.trim(); ls.set('me', ME); $('#meName').textContent = ME || 'ตั้งชื่อ'; } }
 $('#meBtn').onclick = askName; $('#meName').textContent = ME || 'ตั้งชื่อ';
-const views = { today: loadToday, history: loadHistory, add: loadAdd, manage: loadManage };
+const views = { today: loadToday, history: loadHistory, add: loadAdd, manage: loadManage, master: loadMaster };
 function show(v, keepForm) {
   if (!store.signedIn) return showSignin();
   if (v === 'add' && !keepForm) resetForm();

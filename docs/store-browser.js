@@ -56,7 +56,7 @@
       }
     }
     async loadAll() {
-      const tabs = ['Tasks', 'Logs', 'Snapshots'];
+      const tabs = Object.keys(SCHEMA).filter(t => t !== 'Meta');
       const r = await this._req(`${this.base}/values:batchGet?${tabs.map(t => 'ranges=' + t + '!A:Z').join('&')}`);
       const out = {};
       tabs.forEach((tab, i) => {
@@ -83,7 +83,7 @@
   }
 
   class DemoStore {
-    constructor() { this.key = 'checklist-demo-v2'; }
+    constructor() { this.key = 'checklist-demo-v3'; }
     get demo() { return true; }
     get signedIn() { return true; }
     async signIn() {}
@@ -94,7 +94,7 @@
       return d;
     }
     _save(d) { this.mem = d; try { localStorage.setItem(this.key, JSON.stringify(d)); } catch {} }
-    async loadAll() { const d = this.mem || this._load(); this.mem = d; return { Tasks: d.Tasks, Logs: d.Logs, Snapshots: d.Snapshots }; }
+    async loadAll() { const d = this.mem || this._load(); this.mem = d; d.People = d.People || []; d.Categories = d.Categories || []; return { Tasks: d.Tasks, Logs: d.Logs, Snapshots: d.Snapshots, People: d.People, Categories: d.Categories }; }
     async append(tab, obj) { const d = this.mem || this._load(); d[tab].push({ ...obj }); this._save(d); }
     async update(tab, keyField, key, patch) { const d = this.mem || this._load(); const r = d[tab].find(x => String(x[keyField]) === String(key)); Object.assign(r, patch); this._save(d); return r; }
   }
