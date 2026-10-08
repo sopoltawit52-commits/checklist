@@ -1,0 +1,183 @@
+// ตรรกะกลาง ใช้ร่วมกันทั้งหน้าเว็บ (GitHub Pages) และสคริปต์แจ้งเตือน (GitHub Actions)
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.L = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  const TZ = 'Asia/Bangkok';
+  let WORK_DAYS = new Set([1, 2, 3, 4, 5, 6]);
+
+  const SCHEMA = {
+    Tasks: ['id', 'title', 'owner', 'category', 'priority', 'type', 'due_date', 'time', 'remind_before', 'status', 'created_at', 'created_by', 'done_at', 'reminded', 'note'],
+    Logs: ['log_id', 'date', 'time', 'task_id', 'title', 'owner', 'done_by', 'type', 'note', 'void'],
+    Snapshots: ['date', 'planned', 'done', 'pct', 'by_owner_json'],
+    Meta: ['key', 'value'],
+  };
+
+  // ---------------------------------------------------------------- วันที่ / เวลา (เวลาไทยเสมอ)
+  function nowParts(d = new Date()) {
+    const f = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    const p = Object.fromEntries(f.formatToParts(d).map(x => [x.type, x.value]));
+    return { date: `${p.year}-${p.month}-${p.day}`, time: `${p.hour === '24' ? '00' : p.hour}:${p.minute}:${p.second}` };
+  }
+  const today = () => nowParts().date;
+  function addDays(dateStr, n) { const d = new Date(dateStr + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+  function normDate(s) {
+    if (!s) return '';
+    s = String(s).trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+    const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (m) { let y = +m[3]; if (y > 2400) y -= 543; return `${y}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`; }
+    return s;
+  }
+  function normTime(s) {
+    const m = String(s || '').trim().match(/^(\d{1,2})[:.](\d{2})/);
+    return m ? `${m[1].padStart(2, '0')}:${m[2]}` : '';
+  }
+  const toMin = t => { const [h, m] = normTime(t).split(':').map(Number); return h * 60 + m; };
+  const fromMin = n => `${String(Math.floor(n / 60)).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`;
+  function parseDays(spec) {
+    const set = new Set();
+    String(spec || '1-6').split(',').forEach(part => { const [a, b] = part.split('-').map(Number); for (let i = a; i <= (isNaN(b) ? a : b); i++) set.add(i % 7); });
+    return set;
+  }
+  const setWorkDays = spec => { WORK_DAYS = parseDays(spec); };
+  const isWorkDay = dateStr => WORK_DAYS.has(new Date(dateStr + 'T00:00:00Z').getUTCDay());
+  const newId = p => p + '-' + Date.now().toString(36).toUpperCase() + Math.random().toString(16).slice(2, 6).toUpperCase();
+  const PRIO_RANK = { 'สูง': 0, 'กลาง': 1, 'ต่ำ': 2 };
+
+  // ---------------------------------------------------------------- ภาพรวมของวัน
+  function buildDay(tasks, logs, date) {
+    const workDay = isWorkDay(date);
+    const dayLogs = logs.filter(l => normDate(l.date) === date && l.void !== 'Y');
+    const doneIds = new Map(dayLogs.map(l => [l.task_id, l]));
+    const items = [];
+    for (const raw of tasks) {
+      const t = { ...raw, time: normTime(raw.time), due_date: normDate(raw.due_date) };
+      const created = normDate(t.created_at);
+      if (created && created > date) continue;
+      if (t.status === 'cancel') continue;
+      const due = t.due_date;
+      if (t.type === 'daily') {
+        const log = doneIds.get(t.id);
+        if (!workDay && !log) continue;
+        items.push({ ...t, done: !!log, done_time: log ? log.time : '', done_by: log ? log.done_by : '', overdue: false, today: true });
+        continue;
+      }
+      const doneDate = normDate(t.done_at);
+      if (t.status === 'done' && (!doneDate || doneDate < date)) continue;
+      if (t.status === 'done' && doneDate === date) {
+        const log = doneIds.get(t.id);
+        items.push({ ...t, done: true, done_time: log ? log.time : '', done_by: log ? log.done_by : '', overdue: false, today: due === date });
+        continue;
+      }
+      if (!due || due <= date) {
+        if (!workDay && due !== date) continue;
+        items.push({ ...t, done: false, overdue: !!due && due < date, today: due === date });
+      } else items.push({ ...t, done: false, upcoming: true });
+    }
+    const planned = items.filter(i => !i.upcoming);
+    const done = planned.filter(i => i.done).length;
+    const byOwner = {};
+    for (const i of planned) {
+      const o = i.owner || 'ไม่ระบุ';
+      byOwner[o] = byOwner[o] || { owner: o, planned: 0, done: 0 };
+      byOwner[o].planned++; if (i.done) byOwner[o].done++;
+    }
+    Object.values(byOwner).forEach(o => (o.pct = o.planned ? Math.round((o.done / o.planned) * 100) : 0));
+    const sort = (a, b) => (b.overdue - a.overdue) || (a.time || '99').localeCompare(b.time || '99') || ((PRIO_RANK[a.priority] ?? 1) - (PRIO_RANK[b.priority] ?? 1)) || String(a.due_date || '9').localeCompare(String(b.due_date || '9'));
+    return {
+      date, planned: planned.length, done, remaining: planned.length - done,
+      overdue: planned.filter(i => i.overdue && !i.done).length,
+      pct: planned.length ? Math.round((done / planned.length) * 100) : 0,
+      byOwner: Object.values(byOwner).sort((a, b) => b.pct - a.pct),
+      todo: planned.filter(i => !i.done).sort(sort),
+      completed: planned.filter(i => i.done).sort((a, b) => String(a.done_time).localeCompare(String(b.done_time))),
+      upcoming: items.filter(i => i.upcoming).sort(sort),
+    };
+  }
+
+  function buildHistory(tasks, logs, snapshots, from, to) {
+    const snap = new Map(snapshots.map(s => [normDate(s.date), s]));
+    const days = [];
+    for (let d = to; d >= from; d = addDays(d, -1)) {
+      const dayLogs = logs.filter(l => normDate(l.date) === d && l.void !== 'Y');
+      const s = snap.get(d);
+      let planned, done, pct;
+      if (s && d !== today()) { planned = +s.planned; done = +s.done; pct = +s.pct; }
+      else { const b = buildDay(tasks, logs, d); planned = b.planned; done = b.done; pct = b.pct; }
+      days.push({ date: d, planned, done, pct, items: dayLogs.sort((a, b) => String(a.time).localeCompare(String(b.time))) });
+    }
+    const withPlan = days.filter(x => x.planned > 0);
+    return { from, to, avgPct: withPlan.length ? Math.round(withPlan.reduce((s, x) => s + x.pct, 0) / withPlan.length) : 0, totalDone: days.reduce((s, x) => s + x.items.length, 0), days };
+  }
+
+  // ---------------------------------------------------------------- แจ้งเตือนตามเวลา
+  /** งานที่ถึงเวลาเตือน ณ ตอนนี้ (ยังไม่เคยเตือนวันนี้, ยังไม่เสร็จ, ไม่เลยเวลานัดเกิน grace นาที) */
+  function dueReminders(tasks, logs, now = nowParts(), graceMin = 60) {
+    const day = buildDay(tasks, logs, now.date);
+    const nowMin = toMin(now.time);
+    return day.todo.filter(t => {
+      if (!t.time || !t.today) return false;
+      if (t.remind_before === 'none') return false;
+      if (normDate(t.reminded) === now.date) return false;
+      const before = t.remind_before === '' || t.remind_before == null ? 30 : +t.remind_before;
+      const at = toMin(t.time) - before;
+      return nowMin >= at && nowMin <= toMin(t.time) + graceMin;
+    }).map(t => ({ ...t, minutesLeft: toMin(t.time) - nowMin }));
+  }
+
+  // ---------------------------------------------------------------- ข้อความ LINE
+  const shortDate = d => new Date(d + 'T00:00:00+07:00').toLocaleDateString('th-TH', { timeZone: TZ, day: 'numeric', month: 'short' });
+  const longDate = d => new Date(d + 'T00:00:00+07:00').toLocaleDateString('th-TH', { timeZone: TZ, weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
+  const who = t => (t.owner ? ` — ${t.owner}` : '');
+  const daysLate = (due, date) => Math.round((new Date(date) - new Date(due)) / 86400000);
+
+  function morningMessage(tasks, logs, appUrl, opt = {}) {
+    const d = opt.date || today();
+    const day = buildDay(tasks, logs, d);
+    const appts = day.todo.filter(t => t.type === 'once' && t.today);
+    const daily = day.todo.filter(t => t.type === 'daily');
+    const pending = day.todo.filter(t => t.type === 'once' && !t.today);
+    const L = [`☀️ งานวันนี้ — ${longDate(d)}`];
+
+    L.push('', `📅 นัดหมาย / กำหนดเสร็จวันนี้ (${appts.length})`);
+    if (appts.length) appts.forEach(t => L.push(`${t.time ? `🕐 ${t.time} น.` : '▫️'} ${t.title}${who(t)}`));
+    else L.push('— ไม่มี —');
+
+    if (opt.includeDaily !== false && daily.length) {
+      L.push('', `🔁 งานประจำวัน (${daily.length})`);
+      daily.forEach(t => L.push(`${t.time ? `🕐 ${t.time}` : '▫️'} ${t.title}${who(t)}`));
+    }
+
+    L.push('', `⏳ งานค้าง (${pending.length})`);
+    if (pending.length) {
+      pending.slice(0, 30).forEach(t => {
+        const tag = t.overdue ? `🔴 [เลยกำหนด ${daysLate(t.due_date, d)} วัน]` : '▫️';
+        L.push(`${tag} ${t.title}${who(t)}`);
+      });
+      if (pending.length > 30) L.push(`…และอีก ${pending.length - 30} รายการ`);
+    } else L.push('✅ ไม่มีงานค้าง');
+
+    if (day.upcoming.length && opt.includeUpcoming !== false) {
+      const soon = day.upcoming.filter(t => t.due_date <= addDays(d, 3));
+      if (soon.length) { L.push('', `🗓️ ใกล้ถึงกำหนด (3 วัน)`); soon.forEach(t => L.push(`▫️ ${shortDate(t.due_date)}${t.time ? ' ' + t.time : ''} ${t.title}${who(t)}`)); }
+    }
+    if (appUrl) L.push('', `🔗 ${appUrl}`);
+    let msg = L.join('\n');
+    if (msg.length > 4900) msg = msg.slice(0, 4880) + '\n…(ดูต่อในเว็บ)';
+    return msg;
+  }
+
+  function reminderMessage(items) {
+    const L = ['⏰ แจ้งเตือนนัดหมาย'];
+    items.sort((a, b) => a.time.localeCompare(b.time)).forEach(t => {
+      const left = t.minutesLeft > 0 ? `อีก ${t.minutesLeft} นาที` : t.minutesLeft === 0 ? 'ถึงเวลาแล้ว' : `เลยมา ${-t.minutesLeft} นาที`;
+      L.push('', `🕐 ${t.time} น. (${left})`, `📌 ${t.title}`);
+      if (t.owner) L.push(`👤 ${t.owner}`);
+      if (t.note) L.push(`📝 ${t.note}`);
+    });
+    return L.join('\n');
+  }
+
+  return { SCHEMA, TZ, nowParts, today, addDays, normDate, normTime, toMin, fromMin, setWorkDays, isWorkDay, newId, buildDay, buildHistory, dueReminders, morningMessage, reminderMessage };
+});

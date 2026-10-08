@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>เช็คลิสต์งานทีม</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%2306c755'/><path d='M9 16.5l4.5 4.5L23 11' stroke='white' stroke-width='3.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+<style>
+:root{
+  --bg:#f4f6f8;--card:#fff;--ink:#16202a;--muted:#5d6b78;--line:#e3e8ed;
+  --brand:#06a94d;--brand-soft:#e3f6eb;--warn:#d97706;--warn-soft:#fdf1e0;--bad:#d03b3b;--bad-soft:#fbe7e7;
+  --info:#2563eb;--info-soft:#e6eefc;--shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.08);
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0f1419;--card:#18212a;--ink:#e6edf3;--muted:#93a1ae;--line:#2a3542;
+  --brand:#2fcf74;--brand-soft:#173826;--warn:#f0a43a;--warn-soft:#3a2c14;--bad:#f06a6a;--bad-soft:#3d1d1d;
+  --info:#6ea0ff;--info-soft:#1b2a45;--shadow:none;}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Sarabun","Noto Sans Thai","Leelawadee UI",Tahoma,system-ui,sans-serif;font-size:15px;line-height:1.5;padding-bottom:84px}
+header{background:var(--card);border-bottom:1px solid var(--line);padding:14px 16px;position:sticky;top:0;z-index:5}
+header .row{max-width:880px;margin:0 auto;display:flex;align-items:center;gap:10px}
+header h1{font-size:18px;margin:0;flex:1}
+header .me{font-size:13px;color:var(--muted);background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:4px 10px;cursor:pointer}
+main{max-width:880px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px;box-shadow:var(--shadow)}
+.card h2{font-size:16px;margin:0 0 12px;display:flex;align-items:center;gap:8px}
+.card h2 .sub{font-weight:400;color:var(--muted);font-size:13px;margin-left:auto}
+.kpi{display:grid;grid-template-columns:150px 1fr;gap:18px;align-items:center}
+.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.stat{border-radius:12px;padding:10px 12px;background:var(--bg)}
+.stat b{display:block;font-size:24px;line-height:1.2}
+.stat span{font-size:13px;color:var(--muted)}
+.stat.ok b{color:var(--brand)}.stat.warn b{color:var(--warn)}.stat.bad b{color:var(--bad)}
+@media (max-width:520px){.kpi{grid-template-columns:1fr;justify-items:center}.stats{width:100%}}
+.owner{display:grid;grid-template-columns:90px 1fr 70px;gap:10px;align-items:center;margin:6px 0;font-size:14px}
+.owner .track{height:10px;background:var(--bg);border-radius:6px;overflow:hidden}
+.owner .fill{height:100%;border-radius:6px}
+.owner .num{text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.chip{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:999px;padding:4px 12px;font-size:13px;cursor:pointer;font-family:inherit}
+.chip.on{background:var(--ink);color:var(--card);border-color:var(--ink)}
+.task{display:flex;gap:12px;align-items:flex-start;padding:11px 4px;border-top:1px solid var(--line)}
+.task:first-of-type{border-top:0}
+.task .cb{flex:none;width:26px;height:26px;border-radius:8px;border:2px solid var(--muted);background:transparent;cursor:pointer;display:grid;place-items:center;margin-top:1px}
+.task .cb:hover{border-color:var(--brand)}
+.task.done .cb{background:var(--brand);border-color:var(--brand)}
+.task.done .cb::after{content:"";width:10px;height:6px;border:solid #fff;border-width:0 0 2.5px 2.5px;transform:rotate(-45deg) translate(1px,-1px)}
+.task .body{flex:1;min-width:0}
+.task .title{font-weight:600;word-break:break-word}
+.task.done .title{text-decoration:line-through;color:var(--muted);font-weight:400}
+.meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;font-size:12px;color:var(--muted)}
+.tag{border-radius:6px;padding:1px 7px;background:var(--bg)}
+.tag.daily{background:var(--info-soft);color:var(--info)}
+.tag.high{background:var(--warn-soft);color:var(--warn)}
+.tag.over{background:var(--bad-soft);color:var(--bad);font-weight:600}
+.tag.ok{background:var(--brand-soft);color:var(--brand)}
+.empty{color:var(--muted);text-align:center;padding:18px 0}
+details>summary{cursor:pointer;color:var(--muted);font-size:14px;padding:6px 0}
+form .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:520px){form .grid{grid-template-columns:1fr}}
+label{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
+input,select,textarea{width:100%;font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:10px;padding:9px 11px}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--brand);outline-offset:-1px}
+.full{grid-column:1/-1}
+.seg{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.seg label{flex:1;margin:0;text-align:center;padding:9px;cursor:pointer;color:var(--ink);font-size:14px}
+.seg input{display:none}
+.seg input:checked+span{color:var(--brand);font-weight:700}
+.seg label:has(input:checked){background:var(--brand-soft)}
+.btn{font:inherit;border:0;border-radius:10px;padding:10px 16px;cursor:pointer;background:var(--brand);color:#fff;font-weight:600}
+.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line);font-weight:400}
+.btn.sm{padding:5px 10px;font-size:13px}
+.btn.danger{background:transparent;color:var(--bad);border:1px solid var(--line);font-weight:400}
+nav{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);display:flex;justify-content:center;padding-bottom:env(safe-area-inset-bottom);z-index:6}
+nav button{flex:1;max-width:180px;background:none;border:0;font:inherit;font-size:12px;color:var(--muted);padding:8px 0 10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px}
+nav button svg{width:22px;height:22px}
+nav button.on{color:var(--brand);font-weight:700}
+.hist-bars{display:flex;align-items:flex-end;gap:4px;height:150px;padding-top:6px;position:relative;border-bottom:1px solid var(--line)}
+.hist-bars .b{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%;cursor:pointer;min-width:0}
+.hist-bars .b i{display:block;width:100%;max-width:28px;border-radius:5px 5px 0 0}
+.hist-bars .b small{font-size:10px;color:var(--muted);margin-bottom:2px}
+.hist-x{display:flex;gap:4px}.hist-x span{flex:1;text-align:center;font-size:10px;color:var(--muted);min-width:0;overflow:hidden}
+.target{position:absolute;left:0;right:0;border-top:1.5px dashed var(--warn);pointer-events:none}
+.target em{position:absolute;right:0;top:-17px;font-size:11px;color:var(--warn);font-style:normal}
+.day{border-top:1px solid var(--line);padding:10px 0}
+.day .hd{display:flex;align-items:center;gap:10px;cursor:pointer}
+.day .hd b{flex:1}
+.day ul{margin:8px 0 0;padding-left:20px;font-size:14px}
+.day li{margin:3px 0}.day li .t{color:var(--muted);font-variant-numeric:tabular-nums;margin-right:6px}
+.toast{position:fixed;left:50%;bottom:92px;transform:translateX(-50%);background:var(--ink);color:var(--card);padding:10px 16px;border-radius:10px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:9;max-width:90vw}
+.toast.show{opacity:1}
+.mtable{width:100%;border-collapse:collapse;font-size:14px}
+.mtable td{padding:8px 4px;border-top:1px solid var(--line);vertical-align:top}
+.mtable td:last-child{text-align:right;white-space:nowrap}
+pre.preview{white-space:pre-wrap;background:var(--bg);border-radius:10px;padding:12px;font-family:inherit;font-size:13px;max-height:360px;overflow:auto;margin:10px 0}
+.banner{background:var(--warn-soft);color:var(--warn);border-radius:10px;padding:8px 12px;font-size:13px;margin-bottom:12px}
+.hidden{display:none!important}
+</style>
+<style>
+.appt{display:flex;gap:12px;align-items:stretch;padding:8px 0;border-top:1px solid var(--line)}
+.appt:first-of-type{border-top:0}
+.appt .clock{flex:none;width:64px;text-align:center;border-radius:10px;background:var(--info-soft);color:var(--info);font-weight:700;display:flex;flex-direction:column;justify-content:center;font-size:16px;font-variant-numeric:tabular-nums}
+.appt .clock small{font-weight:400;font-size:11px}
+.appt.past .clock{background:var(--bad-soft);color:var(--bad)}
+.appt.done .clock{background:var(--brand-soft);color:var(--brand)}
+.appt.done .title{text-decoration:line-through;color:var(--muted)}
+.appt .body{flex:1;min-width:0;padding:4px 0}
+.appt .title{font-weight:600}
+.signin{max-width:420px;margin:60px auto;text-align:center}
+.signin p{color:var(--muted)}
+.tag.time{background:var(--info-soft);color:var(--info);font-weight:600}
+.row2{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.hint{font-size:12px;color:var(--muted);margin-top:4px}
+</style>
+</head>
+<body>
+<header><div class="row">
+  <h1>✅ <span id="appName">เช็คลิสต์งานทีม</span></h1>
+  <span class="me" id="meBtn" title="เปลี่ยนชื่อผู้ใช้">👤 <span id="meName">ตั้งชื่อ</span></span>
+</div></header>
+
+<main>
+  <div id="demoBanner" class="banner hidden">โหมดทดลอง — ข้อมูลตัวอย่างเก็บในเบราว์เซอร์นี้เท่านั้น (ใส่ SHEET_ID / CLIENT_ID ใน config.js เพื่อใช้จริง)</div>
+
+  <section id="v-signin" class="hidden">
+    <div class="card signin">
+      <h2 style="justify-content:center">🔐 เข้าสู่ระบบ</h2>
+      <p>ใช้บัญชี Google ที่ได้รับสิทธิ์แก้ไข Google Sheet ของทีม</p>
+      <button class="btn" id="signinBtn">เข้าสู่ระบบด้วย Google</button>
+      <p id="signinErr" style="color:var(--bad)"></p>
+    </div>
+  </section>
+
+  <!-- ===== วันนี้ ===== -->
+  <section id="v-today" class="hidden">
+    <div class="card">
+      <h2>KPI วันนี้ <span class="sub" id="todayLabel"></span></h2>
+      <div class="kpi">
+        <div id="ring"></div>
+        <div class="stats">
+          <div class="stat"><b id="sPlan">0</b><span>งานตามแผน</span></div>
+          <div class="stat ok"><b id="sDone">0</b><span>ทำเสร็จแล้ว</span></div>
+          <div class="stat warn"><b id="sLeft">0</b><span>เหลือต้องทำ</span></div>
+          <div class="stat bad"><b id="sOver">0</b><span>เกินกำหนด</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="card" id="apptCard">
+      <h2>📅 นัดหมายวันนี้ <span class="sub" id="apptCount"></span></h2>
+      <div id="apptList"></div>
+    </div>
+    <div class="card">
+      <h2>📋 รายการที่ต้องทำ <span class="sub" id="leftCount"></span></h2>
+      <div class="chips" id="ownerFilter"></div>
+      <div id="todoList"></div>
+      <details id="upWrap" class="hidden"><summary>งานที่ยังไม่ถึงกำหนด (<span id="upCount"></span>)</summary><div id="upList"></div></details>
+    </div>
+    <div class="card" id="ownerCard">
+      <h2>KPI รายบุคคล <span class="sub">เป้าหมาย ≥ <span class="tgt"></span>%</span></h2>
+      <div id="owners"></div>
+    </div>
+    <div class="card">
+      <h2>✔️ ทำเสร็จวันนี้ <span class="sub" id="doneCount"></span></h2>
+      <div id="doneList"></div>
+    </div>
+  </section>
+
+  <!-- ===== ประวัติ ===== -->
+  <section id="v-history" class="hidden">
+    <div class="card">
+      <h2>ประวัติ KPI รายวัน</h2>
+      <div class="chips" id="rangeChips">
+        <button class="chip" data-d="7">7 วัน</button><button class="chip on" data-d="14">14 วัน</button><button class="chip" data-d="30">30 วัน</button><button class="chip" data-d="90">90 วัน</button>
+      </div>
+      <div class="stats" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px">
+        <div class="stat ok"><b id="hAvg">0%</b><span>KPI เฉลี่ย</span></div>
+        <div class="stat"><b id="hDone">0</b><span>งานที่ทำเสร็จ</span></div>
+        <div class="stat"><b id="hHit">0</b><span>วันที่ถึงเป้า</span></div>
+      </div>
+      <div class="hist-bars" id="hBars"></div>
+      <div class="hist-x" id="hX"></div>
+    </div>
+    <div class="card">
+      <h2>รายการที่ทำสำเร็จแต่ละวัน</h2>
+      <div id="hDays"></div>
+    </div>
+  </section>
+
+  <!-- ===== เพิ่ม / แก้ไขงาน ===== -->
+  <section id="v-add" class="hidden">
+    <div class="card">
+      <h2 id="formTitle">➕ เพิ่มรายการงาน</h2>
+      <form id="addForm" autocomplete="off">
+        <input type="hidden" name="task_id">
+        <div class="grid">
+          <div class="full"><label>ชื่องาน / นัดหมาย *</label><input name="title" required maxlength="200" placeholder="เช่น นัดช่างตรวจ Inverter ไลน์ 2"></div>
+          <div class="full"><label>ประเภทงาน</label>
+            <div class="seg">
+              <label><input type="radio" name="type" value="once" checked><span>ครั้งเดียว / นัดหมาย</span></label>
+              <label><input type="radio" name="type" value="daily"><span>ประจำวัน (ทำทุกวัน)</span></label>
+            </div>
+          </div>
+          <div id="dueWrap"><label>วันที่ (กำหนด/นัดหมาย)</label><input type="date" name="due_date"></div>
+          <div><label>เวลา (ถ้ามี)</label><input type="time" name="time"><div class="hint">ใส่เวลาเพื่อให้ LINE เด้งเตือน</div></div>
+          <div><label>แจ้งเตือน LINE ล่วงหน้า</label>
+            <select name="remind_before">
+              <option value="0">ตรงเวลา</option><option value="15">15 นาทีก่อน</option><option value="30" selected>30 นาทีก่อน</option>
+              <option value="60">1 ชั่วโมงก่อน</option><option value="120">2 ชั่วโมงก่อน</option><option value="none">ไม่ต้องเตือน</option>
+            </select></div>
+          <div><label>ผู้รับผิดชอบ</label><input name="owner" list="ownerList" placeholder="ชื่อ"></div>
+          <div><label>ความสำคัญ</label><select name="priority"><option>สูง</option><option selected>กลาง</option><option>ต่ำ</option></select></div>
+          <div><label>หมวดหมู่</label><input name="category" list="catList" placeholder="เช่น ซ่อมบำรุง, QC"></div>
+          <div class="full"><label>หมายเหตุ (แสดงในข้อความเตือน)</label><textarea name="note" rows="2" placeholder="เช่น สถานที่ / เบอร์ติดต่อ"></textarea></div>
+          <div class="full row2"><button class="btn" type="submit" id="saveBtn">บันทึกงาน</button><button class="btn ghost hidden" type="button" id="cancelEdit">ยกเลิกการแก้ไข</button></div>
+        </div>
+      </form>
+      <datalist id="ownerList"></datalist><datalist id="catList"></datalist>
+    </div>
+  </section>
+
+  <!-- ===== จัดการ ===== -->
+  <section id="v-manage" class="hidden">
+    <div class="card">
+      <h2>🗂️ จัดการรายการงาน</h2>
+      <div class="chips" id="mFilter">
+        <button class="chip on" data-s="open">ใช้งานอยู่</button><button class="chip" data-s="done">เสร็จแล้ว</button><button class="chip" data-s="cancel">ยกเลิก</button>
+      </div>
+      <table class="mtable"><tbody id="mBody"></tbody></table>
+    </div>
+    <div class="card">
+      <h2>💬 ตัวอย่างข้อความ LINE ตอนเช้า</h2>
+      <div style="font-size:14px;color:var(--muted)">GitHub Actions ส่งเข้ากลุ่มอัตโนมัติทุกเช้าวันทำงาน และเด้งเตือนตามเวลานัดหมาย</div>
+      <pre class="preview" id="preview"></pre>
+    </div>
+  </section>
+</main>
+
+<nav id="nav">
+  <button data-v="today"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/></svg>วันนี้</button>
+  <button data-v="history"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>ประวัติ</button>
+  <button data-v="add"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>เพิ่มงาน</button>
+  <button data-v="manage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/></svg>จัดการ</button>
+</nav>
+<div class="toast" id="toast"></div>
+
+<script src="config.js"></script>
+<script src="logic.js"></script>
+<script src="demo-data.js"></script>
+<script src="store-browser.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="app.js"></script>
+</body>
+</html>
