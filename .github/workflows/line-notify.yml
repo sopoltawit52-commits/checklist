@@ -1,0 +1,50 @@
+name: LINE แจ้งเตือนงาน
+
+on:
+  schedule:
+    # GitHub ใช้เวลา UTC (เวลาไทย = UTC+7) — รันทุก 15 นาที ช่วง 05:00–19:59 น. เวลาไทย
+    - cron: '*/15 22-23 * * *'   # 05:00–06:59 น.
+    - cron: '*/15 0-12 * * *'    # 07:00–19:59 น.
+  workflow_dispatch:              # กดรันเองได้จากแท็บ Actions
+    inputs:
+      mode:
+        description: 'auto = ปกติ, morning = ส่งสรุปเช้าทันที, preview = ดูข้อความไม่ส่ง'
+        default: 'auto'
+        type: choice
+        options: [auto, morning, preview]
+
+permissions:
+  contents: read
+  actions: write   # ใช้กันไม่ให้ GitHub ปิดตัวตั้งเวลาเองเมื่อ repo ไม่มีความเคลื่อนไหว 60 วัน
+
+concurrency:
+  group: line-notify
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --omit=dev --no-audit --no-fund
+      - name: ตรวจและส่งแจ้งเตือน
+        run: node scripts/notify.js ${{ github.event.inputs.mode || 'auto' }}
+        env:
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+          GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_GROUP_ID: ${{ secrets.LINE_GROUP_ID }}
+          APP_URL: ${{ vars.APP_URL }}
+          MORNING_TIME: ${{ vars.MORNING_TIME || '06:00' }}
+          WORK_DAYS: ${{ vars.WORK_DAYS || '1-6' }}
+          INCLUDE_DAILY: ${{ vars.INCLUDE_DAILY || 'false' }}
+      - name: กันตัวตั้งเวลาถูกปิดอัตโนมัติ (keepalive)
+        if: always()
+        continue-on-error: true
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/line-notify.yml/enable"
+        env:
+          GH_TOKEN: ${{ github.token }}
