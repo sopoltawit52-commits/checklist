@@ -27,6 +27,16 @@
     add('Backup โปรแกรม PLC S7-1200 ไลน์ 2', 'วิชัย', 'ระบบควบคุม', 'กลาง', 'once', L.addDays(d, 2), '09:00', L.addDays(d, -2), '30');
     add('ปรับปรุง WI ล้างแบบหล่อ (TH/EN)', 'นภา', 'เอกสาร', 'กลาง', 'once', L.addDays(d, 6), '', L.addDays(d, -1));
 
+    const plan = (title, owner, category, priority, startOff, endOff, doneOff) => {
+      T.push({ id: 'T-' + String(T.length + 1).padStart(3, '0'), title, owner, category, priority, type: 'plan', start_date: L.addDays(d, startOff), due_date: L.addDays(d, endOff), time: '', remind_before: '', status: doneOff === undefined ? 'open' : 'done', created_at: L.addDays(d, startOff - 2) + ' 08:00:00', created_by: 'admin', done_at: doneOff === undefined ? '' : L.addDays(d, doneOff) + ' 15:00:00', reminded: '', note: '' });
+    };
+    plan('ติดตั้งแผง Solar Rooftop โรงงาน 1', 'อรุณ, วิชัย', 'โครงการ', 'สูง', -10, 12);
+    plan('Overhaul เครื่อง Extruder ไลน์ 1', 'สมชาย', 'ซ่อมบำรุง', 'สูง', -9, -3);
+    plan('อัปเกรด HMI ไลน์ 2 เป็น TIA Portal', 'วิชัย', 'ระบบควบคุม', 'กลาง', -5, 2);
+    plan('จัดทำ WI ชุดใหม่ 10 ฉบับ (TH/EN)', 'นภา', 'เอกสาร', 'กลาง', 3, 20);
+    plan('ตรวจสอบระบบดับเพลิงประจำปี', 'อรุณ', 'ความปลอดภัย', 'สูง', -20, -12, -13);
+    plan('ย้ายตู้ MDB ย่อย อาคาร 3', 'วิชัย, สมชาย', 'พลังงาน', 'กลาง', -18, -8, -5);
+
     const logs = [];
     let s = 11; const rnd = () => ((s = (s * 9301 + 49297) % 233280) / 233280);
     for (let i = 14; i >= 1; i--) {

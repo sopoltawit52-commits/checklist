@@ -7,7 +7,7 @@
   let WORK_DAYS = new Set([1, 2, 3, 4, 5, 6]);
 
   const SCHEMA = {
-    Tasks: ['id', 'title', 'owner', 'category', 'priority', 'type', 'due_date', 'time', 'remind_before', 'status', 'created_at', 'created_by', 'done_at', 'reminded', 'note'],
+    Tasks: ['id', 'title', 'owner', 'category', 'priority', 'type', 'due_date', 'time', 'remind_before', 'status', 'created_at', 'created_by', 'done_at', 'reminded', 'note', 'start_date'],
     Logs: ['log_id', 'date', 'time', 'task_id', 'title', 'owner', 'done_by', 'type', 'note', 'void'],
     Snapshots: ['date', 'planned', 'done', 'pct', 'by_owner_json'],
     Meta: ['key', 'value'],
@@ -48,20 +48,60 @@
   const PRIO_RANK = { 'สูง': 0, 'กลาง': 1, 'ต่ำ': 2 };
   // ผู้รับผิดชอบหลายคน เก็บเป็น "ชื่อ1, ชื่อ2"
   const owners = t => String((t && t.owner) || '').split(/\s*,\s*/).map(x => x.trim()).filter(Boolean);
-  const TYPE_LABEL = { daily: 'ประจำวัน', once: 'ครั้งเดียว', backlog: 'รายการค้าง' };
+  const TYPE_LABEL = { daily: 'ประจำวัน', once: 'ครั้งเดียว', backlog: 'รายการค้าง', plan: 'งานตามแผน' };
+  const dayDiff = (a, b) => Math.round((new Date(b + 'T00:00:00Z') - new Date(a + 'T00:00:00Z')) / 86400000);
+
+  // ---------------------------------------------------------------- งานตามแผน (มีวันเริ่ม–วันสิ้นสุด)
+  // state: wait=ยังไม่เริ่ม doing=กำลังทำ over=เกินระยะเวลา ontime=เสร็จตามเวลา late=เสร็จช้า
+  const PLAN_LABEL = { wait: 'ยังไม่เริ่ม', doing: 'กำลังดำเนินการ', over: 'เกินระยะเวลา', ontime: 'เสร็จตามเวลา', late: 'เสร็จช้ากว่ากำหนด' };
+  function planInfo(raw, date = today()) {
+    const start = normDate(raw.start_date) || normDate(raw.created_at) || date;
+    const end = normDate(raw.due_date) || start;
+    const doneDate = raw.status === 'done' ? (normDate(raw.done_at) || date) : '';
+    const total = Math.max(dayDiff(start, end) + 1, 1);
+    let state;
+    if (doneDate) state = doneDate > end ? 'late' : 'ontime';
+    else if (date < start) state = 'wait';
+    else if (date <= end) state = 'doing';
+    else state = 'over';
+    const elapsed = Math.min(Math.max(dayDiff(start, date) + 1, 0), total);
+    return {
+      start, end, doneDate, state, label: PLAN_LABEL[state], totalDays: total,
+      timePct: Math.round((elapsed / total) * 100),
+      daysLeft: dayDiff(date, end), // ติดลบ = เลยมาแล้ว
+      daysLate: state === 'over' ? dayDiff(end, date) : state === 'late' ? dayDiff(end, doneDate) : 0,
+    };
+  }
+  function buildSchedule(tasks, date = today()) {
+    const items = tasks.filter(t => t.type === 'plan' && t.status !== 'cancel').map(t => ({ ...t, ...planInfo(t, date), due_date: normDate(t.due_date), start_date: normDate(t.start_date) }));
+    const ORDER = { over: 0, doing: 1, wait: 2, late: 3, ontime: 4 };
+    items.sort((a, b) => ORDER[a.state] - ORDER[b.state] || a.end.localeCompare(b.end) || a.start.localeCompare(b.start));
+    const c = s => items.filter(i => i.state === s).length;
+    const finished = c('ontime') + c('late');
+    return { date, items, total: items.length, wait: c('wait'), doing: c('doing'), over: c('over'), ontime: c('ontime'), late: c('late'), onTimePct: finished ? Math.round((c('ontime') / finished) * 100) : null };
+  }
 
   // ---------------------------------------------------------------- ภาพรวมของวัน
   function buildDay(tasks, logs, date) {
     const workDay = isWorkDay(date);
     const dayLogs = logs.filter(l => normDate(l.date) === date && l.void !== 'Y');
     const doneIds = new Map(dayLogs.map(l => [l.task_id, l]));
-    const items = [], backlog = [], backlogDone = [];
+    const items = [], backlog = [], backlogDone = [], plans = [], plansDone = [];
     for (const raw of tasks) {
       const t = { ...raw, time: normTime(raw.time), due_date: normDate(raw.due_date) };
       const created = normDate(t.created_at);
       if (created && created > date) continue;
       if (t.status === 'cancel') continue;
       const due = t.due_date;
+      if (t.type === 'plan') { // งานตามแผน — แสดงแยก ไม่นับเข้า KPI รายวัน
+        const info = planInfo(t, date);
+        if (t.status === 'done') {
+          if (info.doneDate === date) { const log = doneIds.get(t.id); plansDone.push({ ...t, ...info, done: true, done_time: log ? log.time : '', done_by: log ? log.done_by : '' }); }
+          continue;
+        }
+        if (info.state !== 'wait') plans.push({ ...t, ...info, done: false });
+        continue;
+      }
       if (t.type === 'backlog') { // รายการค้าง ไม่มีกำหนดวัน — ไม่นับเข้า KPI รายวัน
         const doneDate = normDate(t.done_at);
         if (t.status === 'done') {
@@ -110,6 +150,9 @@
       upcoming: items.filter(i => i.upcoming).sort(sort),
       backlog: backlog.sort((a, b) => ((PRIO_RANK[a.priority] ?? 1) - (PRIO_RANK[b.priority] ?? 1)) || String(a.created_at).localeCompare(String(b.created_at))),
       backlogDone,
+      plans: plans.sort((a, b) => (b.state === 'over') - (a.state === 'over') || a.end.localeCompare(b.end)),
+      plansDone,
+      planOver: plans.filter(p => p.state === 'over').length,
     };
   }
 
@@ -175,6 +218,13 @@
       if (pending.length > 30) L.push(`…และอีก ${pending.length - 30} รายการ`);
     } else L.push('✅ ไม่มีงานค้าง');
 
+    const late = day.plans.filter(p => p.state === 'over');
+    if (late.length && opt.includePlan !== false) {
+      L.push('', `🔴 งานเกินระยะเวลา (${late.length})`);
+      late.slice(0, 30).forEach(t => L.push(`▫️ ${t.title}${who(t)}\n     (${shortDate(t.start)}–${shortDate(t.end)} · เกิน ${t.daysLate} วัน)`));
+      if (late.length > 30) L.push(`…และอีก ${late.length - 30} รายการ`);
+    }
+
     if (day.backlog.length && opt.includeBacklog !== false) {
       L.push('', `📝 รายการค้างทำ (${day.backlog.length})`);
       day.backlog.slice(0, 30).forEach(t => L.push(`${t.priority === 'สูง' ? '🟠' : '▫️'} ${t.title}${who(t)}`));
@@ -202,5 +252,5 @@
     return L.join('\n');
   }
 
-  return { owners, TYPE_LABEL, SCHEMA, TZ, nowParts, today, addDays, normDate, normTime, toMin, fromMin, setWorkDays, isWorkDay, newId, buildDay, buildHistory, dueReminders, morningMessage, reminderMessage };
+  return { owners, TYPE_LABEL, PLAN_LABEL, planInfo, buildSchedule, dayDiff, SCHEMA, TZ, nowParts, today, addDays, normDate, normTime, toMin, fromMin, setWorkDays, isWorkDay, newId, buildDay, buildHistory, dueReminders, morningMessage, reminderMessage };
 });

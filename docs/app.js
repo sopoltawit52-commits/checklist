@@ -7,7 +7,7 @@ const store = createBrowserStore(CFG);
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const ls = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
-let ME = ls.get('me') || '', ownerSel = 'ทั้งหมด', histDays = 14, mStatus = 'open', DATA = null, inited = false;
+let ME = ls.get('me') || '', ownerSel = 'ทั้งหมด', histDays = 14, gFilter = 'active', gRange = 31, gOwner = 'ทั้งหมด', mStatus = 'open', DATA = null, inited = false;
 document.querySelectorAll('.tgt').forEach(e => (e.textContent = TARGET));
 $('#appName').textContent = CFG.APP_NAME || 'เช็คลิสต์งานทีม';
 document.title = CFG.APP_NAME || document.title;
@@ -38,15 +38,21 @@ function ring(p) {
 function taskRow(t, mode) {
   const tags = [];
   if (t.time) tags.push(`<span class="tag time">🕐 ${esc(t.time)}${t.remind_before && t.remind_before !== 'none' ? ' 🔔' : ''}</span>`);
+  if (t.type === 'plan') {
+    const p = t.state ? t : L.planInfo(t);
+    tags.push(`<span class="tag st st-${p.state}">${p.state === 'over' ? `⚠ เกินระยะเวลา ${p.daysLate} วัน` : p.state === 'late' ? `เสร็จช้า ${p.daysLate} วัน` : p.state === 'doing' ? (p.daysLeft === 0 ? 'ครบกำหนดวันนี้' : `เหลือ ${p.daysLeft} วัน`) : p.label}</span>`);
+    tags.push(`<span class="tag">📆 ${fmtDue(p.start)} – ${fmtDue(p.end)}</span>`);
+  }
   if (t.overdue) tags.push(`<span class="tag over">เกินกำหนด ${fmtDue(t.due_date)}</span>`);
   else if (t.type === 'once' && t.due_date) tags.push(`<span class="tag">${t.today ? 'วันนี้' : 'กำหนด ' + fmtDue(t.due_date)}</span>`);
-  tags.push(t.type === 'daily' ? '<span class="tag daily">ประจำวัน</span>' : t.type === 'backlog' ? '<span class="tag backlog">รายการค้าง</span>' : '<span class="tag">ครั้งเดียว</span>');
+  tags.push(t.type === 'daily' ? '<span class="tag daily">ประจำวัน</span>' : t.type === 'backlog' ? '<span class="tag backlog">รายการค้าง</span>' : t.type === 'plan' ? '<span class="tag plan">งานตามแผน</span>' : '<span class="tag">ครั้งเดียว</span>');
   if (t.priority === 'สูง') tags.push('<span class="tag high">สำคัญสูง</span>');
   if (t.owner) tags.push(`<span>👤 ${esc(L.owners(t).join(', '))}</span>`);
   if (t.category) tags.push(`<span>${catDot(t.category)}${esc(t.category)}</span>`);
   if (mode === 'done') tags.push(`<span class="tag ok">✓ ${esc(t.done_time || '')}${t.done_by ? ' โดย ' + esc(t.done_by) : ''}</span>`);
   const cb = mode === 'up' ? '' : `<button class="cb" aria-label="${mode === 'done' ? 'ยกเลิกเสร็จ' : 'ทำเสร็จ'}" data-id="${t.id}" data-act="${mode === 'done' ? 'undo' : 'done'}"></button>`;
-  return `<div class="task ${mode === 'done' ? 'done' : ''}">${cb}<div class="body"><div class="title">${esc(t.title)}</div><div class="meta">${tags.join('')}</div>${t.note ? `<div class="meta">📝 ${esc(t.note)}</div>` : ''}</div></div>`;
+  const prog = t.type === 'plan' && mode !== 'done' && t.state ? `<div class="prog st-${t.state}" title="ใช้เวลาไปแล้ว ${t.timePct}% ของระยะเวลา"><i style="width:${t.timePct}%"></i></div>` : '';
+  return `<div class="task ${mode === 'done' ? 'done' : ''}">${cb}<div class="body"><div class="title">${esc(t.title)}</div><div class="meta">${tags.join('')}</div>${prog}${t.note ? `<div class="meta">📝 ${esc(t.note)}</div>` : ''}</div></div>`;
 }
 
 // ---------------------------------------------------------------- วันนี้
@@ -71,11 +77,14 @@ async function loadToday() {
 
   $('#ownerCard').classList.toggle('hidden', !d.byOwner.length);
   $('#owners').innerHTML = d.byOwner.map(o => `<div class="owner"><span>${esc(o.owner)}</span><div class="track"><div class="fill" style="width:${o.pct}%;background:${colorFor(o.pct)}"></div></div><span class="num">${o.done}/${o.planned} · ${o.pct}%</span></div>`).join('');
-  const owners = ['ทั้งหมด', ...new Set([...d.todo, ...d.completed, ...d.upcoming, ...d.backlog].flatMap(t => L.owners(t).length ? L.owners(t) : ['ไม่ระบุ']))];
+  const owners = ['ทั้งหมด', ...new Set([...d.todo, ...d.completed, ...d.upcoming, ...d.backlog, ...d.plans].flatMap(t => L.owners(t).length ? L.owners(t) : ['ไม่ระบุ']))];
   if (!owners.includes(ownerSel)) ownerSel = 'ทั้งหมด';
   $('#ownerFilter').innerHTML = owners.map(o => `<button class="chip ${o === ownerSel ? 'on' : ''}" data-o="${esc(o)}">${esc(o)}</button>`).join('');
   const f = list => (ownerSel === 'ทั้งหมด' ? list : list.filter(t => (L.owners(t).length ? L.owners(t) : ['ไม่ระบุ']).includes(ownerSel)));
-  const todo = f(d.todo), done = f([...d.completed, ...d.backlogDone]), up = f(d.upcoming), bl = f(d.backlog);
+  const todo = f(d.todo), done = f([...d.completed, ...d.backlogDone, ...d.plansDone]), up = f(d.upcoming), bl = f(d.backlog), pl = f(d.plans);
+  $('#planCard').classList.toggle('hidden', !d.plans.length);
+  $('#planCount').innerHTML = `${pl.length} รายการ${d.planOver ? ` · <b style="color:var(--bad)">เกิน ${d.planOver}</b>` : ''}`;
+  $('#planList').innerHTML = pl.length ? pl.map(t => taskRow(t, 'todo')).join('') : '<div class="empty">ไม่มีงานตามแผนของคนนี้</div>';
   $('#backlogCard').classList.toggle('hidden', !d.backlog.length);
   $('#backlogCount').textContent = `${bl.length} รายการ`;
   $('#backlogList').innerHTML = bl.length ? bl.map(t => taskRow(t, 'todo')).join('') : '<div class="empty">ไม่มีรายการค้างของคนนี้</div>';
@@ -101,6 +110,43 @@ async function undoDone(id) {
   const log = Logs.find(l => l.task_id === id && L.normDate(l.date) === L.today() && l.void !== 'Y');
   if (log) await store.update('Logs', 'log_id', log.log_id, { void: 'Y' });
   if (t.type !== 'daily') await store.update('Tasks', 'id', id, { status: 'open', done_at: '' });
+}
+
+// ---------------------------------------------------------------- สเก็ตดูล (Gantt)
+async function loadSchedule() {
+  const { Tasks } = await refresh();
+  const td = L.today(), sc = L.buildSchedule(Tasks, td);
+  $('#gDate').textContent = 'วันนี้ ' + fmtDue(td);
+  $('#gDoing').textContent = sc.doing; $('#gOver').textContent = sc.over; $('#gWait').textContent = sc.wait;
+  $('#gOnTime').textContent = sc.onTimePct === null ? '-' : sc.onTimePct + '%';
+  const owners = ['ทั้งหมด', ...new Set(sc.items.flatMap(t => (L.owners(t).length ? L.owners(t) : ['ไม่ระบุ'])))];
+  if (!owners.includes(gOwner)) gOwner = 'ทั้งหมด';
+  $('#gOwner').innerHTML = owners.length > 2 ? owners.map(o => `<button class="chip ${o === gOwner ? 'on' : ''}" data-go="${esc(o)}">${esc(o)}</button>`).join('') : '';
+  const pick = { active: i => ['over', 'doing', 'wait'].includes(i.state), over: i => i.state === 'over', done: i => ['ontime', 'late'].includes(i.state), all: () => true }[gFilter];
+  const list = sc.items.filter(pick).filter(t => gOwner === 'ทั้งหมด' || (L.owners(t).length ? L.owners(t) : ['ไม่ระบุ']).includes(gOwner));
+  // ช่วงเวลาที่แสดง: เริ่มก่อนวันนี้เล็กน้อย
+  const from = L.addDays(td, -Math.round(gRange * 0.25)), to = L.addDays(from, gRange - 1), span = gRange;
+  const x = d => (L.dayDiff(from, d) / span) * 100;
+  const clamp = v => Math.min(Math.max(v, 0), 100);
+  const ticks = [];
+  const step = gRange <= 14 ? 2 : gRange <= 31 ? 7 : 14;
+  for (let i = 0; i < span; i += step) ticks.push(L.addDays(from, i));
+  const grid = ticks.map(d => `<i class="g-wk" style="left:${x(d)}%"></i>`).join('');
+  $('#gAxis').innerHTML = ticks.map(d => `<span style="left:${clamp(x(d) + 50 / span)}%">${fmtDue(d)}</span>`).join('');
+  const todayX = (L.dayDiff(from, td) + 0.5) / span * 100;
+  $('#gRows').innerHTML = list.length ? list.map(t => {
+    const endShown = t.doneDate && t.doneDate > t.end ? t.doneDate : t.state === 'over' ? td : t.end;
+    const a = x(t.start), b = x(L.addDays(t.end, 1));
+    const l = clamp(a), r = clamp(b);
+    const late = (t.state === 'over' || t.state === 'late') ? `<i class="g-late" style="left:${clamp(b)}%;width:${clamp(x(L.addDays(endShown, 1))) - clamp(b)}%"></i>` : '';
+    const bar = r > l ? `<i class="g-bar ${a < 0 ? 'cut-l' : ''} ${b > 100 ? 'cut-r' : ''}" style="left:${l}%;width:${r - l}%"></i>` : '';
+    const out = b <= 0 && !late ? '<span class="muted" style="position:absolute;left:4px;top:0">◀ ก่อนช่วงที่แสดง</span>' : a >= 100 ? '<span class="muted" style="position:absolute;right:4px;top:0">ถัดไป ▶</span>' : '';
+    const cb = ['ontime', 'late'].includes(t.state) ? '' : `<button class="cb" style="width:22px;height:22px" aria-label="ทำเสร็จ" data-id="${t.id}" data-act="done" data-from="schedule"></button>`;
+    return `<div class="g-row st-${t.state}"><div class="g-head">${cb}<div class="title">${esc(t.title)}</div><button class="btn ghost sm" data-edit="${t.id}">แก้ไข</button></div>
+      <div class="meta"><span class="tag st">${t.state === 'over' ? `⚠ เกินระยะเวลา ${t.daysLate} วัน` : t.state === 'late' ? `เสร็จช้า ${t.daysLate} วัน` : t.state === 'doing' ? (t.daysLeft === 0 ? 'ครบกำหนดวันนี้' : `กำลังดำเนินการ · เหลือ ${t.daysLeft} วัน`) : t.state === 'wait' ? `เริ่มอีก ${L.dayDiff(td, t.start)} วัน` : 'เสร็จตามเวลา'}</span>
+      <span>📆 ${fmtDue(t.start)} – ${fmtDue(t.end)} (${t.totalDays} วัน)</span>${t.doneDate ? `<span>✓ เสร็จ ${fmtDue(t.doneDate)}</span>` : ''}${t.owner ? `<span>👤 ${esc(L.owners(t).join(', '))}</span>` : ''}${t.category ? `<span>${catDot(t.category)}${esc(t.category)}</span>` : ''}</div>
+      <div class="g-track">${grid}${bar}${late}${out}${todayX >= 0 && todayX <= 100 ? `<i class="g-today" style="left:${todayX}%"></i>` : ''}</div></div>`;
+  }).join('') : `<div class="empty">ไม่มีงานตามแผน${gFilter !== 'all' ? 'ในตัวกรองนี้' : ''} — เพิ่มได้ที่ "เพิ่มงาน" แล้วเลือก "งานตามแผน"</div>`;
 }
 
 // ---------------------------------------------------------------- ประวัติ
@@ -147,7 +193,7 @@ function resetForm() {
   $('#formTitle').textContent = '➕ เพิ่มรายการงาน'; $('#saveBtn').textContent = 'บันทึกงาน';
   $('#cancelEdit').classList.add('hidden'); applyType('once');
   $('#ownerPick').querySelectorAll('input').forEach(i => (i.checked = false));
-  f.elements['due_date'].value = L.today();
+  f.elements['due_date'].value = L.today(); f.elements['start_date'].value = L.today(); f.elements['end_date'].value = L.addDays(L.today(), 7);
 }
 function editTask(id) {
   const t = DATA.Tasks.find(x => x.id === id); if (!t) return;
@@ -159,7 +205,8 @@ function editTask(id) {
   for (const n of want) if (![...box.querySelectorAll('input')].some(i => i.value === n)) box.insertAdjacentHTML('beforeend', `<label><input type="checkbox" name="owner_pick" value="${esc(n)}">${esc(n)}</label>`);
   box.querySelectorAll('input').forEach(i => (i.checked = want.includes(i.value)));
   f.elements['task_id'].value = t.id; f.elements['title'].value = t.title; f.elements['category'].value = t.category; f.elements['priority'].value = t.priority || 'กลาง';
-  const ty = ['daily', 'backlog'].includes(t.type) ? t.type : 'once';
+  const ty = ['daily', 'backlog', 'plan'].includes(t.type) ? t.type : 'once';
+  f.elements['start_date'].value = L.normDate(t.start_date) || L.normDate(t.created_at); f.elements['end_date'].value = L.normDate(t.due_date);
   f.querySelector(`[name=type][value=${ty}]`).checked = true;
   f.elements['due_date'].value = L.normDate(t.due_date); f.elements['time'].value = L.normTime(t.time); f.elements['remind_before'].value = t.remind_before || '30'; f.elements['note'].value = t.note;
   applyType(ty);
@@ -168,18 +215,25 @@ function editTask(id) {
 $('#cancelEdit').onclick = () => { resetForm(); show('manage'); };
 function applyType(ty) {
   $('#dueWrap').classList.toggle('hidden', ty !== 'once');
-  $('#timeWrap').classList.toggle('hidden', ty === 'backlog');
-  $('#remindWrap').classList.toggle('hidden', ty === 'backlog');
+  $('#timeWrap').classList.toggle('hidden', ty === 'backlog' || ty === 'plan');
+  $('#remindWrap').classList.toggle('hidden', ty === 'backlog' || ty === 'plan');
+  $('#planStartWrap').classList.toggle('hidden', ty !== 'plan');
+  $('#planEndWrap').classList.toggle('hidden', ty !== 'plan');
 }
 $('#addForm').addEventListener('change', e => { if (e.target.name === 'type') applyType(e.target.value); });
 $('#addForm').addEventListener('submit', async e => {
   e.preventDefault();
   const fd = Object.fromEntries(new FormData(e.target));
   fd.owner = [...e.target.querySelectorAll('[name=owner_pick]:checked')].map(i => i.value).join(', ');
+  const isPlan = fd.type === 'plan';
+  if (isPlan && (!fd.start_date || !fd.end_date)) return toast('กรุณาใส่วันเริ่มและวันสิ้นสุด');
+  if (isPlan && fd.end_date < fd.start_date) return toast('วันสิ้นสุดต้องไม่ก่อนวันเริ่ม');
   const btn = $('#saveBtn'); btn.disabled = true;
+  const noTime = fd.type === 'backlog' || isPlan;
   const data = {
     title: fd.title.trim(), owner: (fd.owner || '').trim(), category: (fd.category || '').trim(), priority: fd.priority,
-    type: fd.type, due_date: fd.type === 'once' ? fd.due_date : '', time: fd.type === 'backlog' ? '' : (fd.time || ''), remind_before: fd.type !== 'backlog' && fd.time ? fd.remind_before : '', note: fd.note || '',
+    type: fd.type, due_date: fd.type === 'once' ? fd.due_date : isPlan ? fd.end_date : '', start_date: isPlan ? fd.start_date : '',
+    time: noTime ? '' : (fd.time || ''), remind_before: !noTime && fd.time ? fd.remind_before : '', note: fd.note || '',
   };
   try {
     if (fd.task_id) {
@@ -200,8 +254,8 @@ $('#addForm').addEventListener('submit', async e => {
 async function loadManage() {
   const { Tasks, Logs } = await refresh();
   const list = Tasks.filter(t => (t.status || 'open') === mStatus)
-    .sort((a, b) => ({ daily: 0, once: 1, backlog: 2 }[a.type] ?? 1) - ({ daily: 0, once: 1, backlog: 2 }[b.type] ?? 1) || String(L.normDate(a.due_date) || '9').localeCompare(String(L.normDate(b.due_date) || '9')) || L.normTime(a.time).localeCompare(L.normTime(b.time)));
-  $('#mBody').innerHTML = list.length ? list.map(t => `<tr><td><b>${esc(t.title)}</b><div class="meta"><span class="tag ${t.type === 'once' ? '' : t.type}">${L.TYPE_LABEL[t.type] || 'ครั้งเดียว'}</span>${t.time ? `<span class="tag time">🕐 ${esc(L.normTime(t.time))}</span>` : ''}${t.owner ? `<span>👤 ${esc(L.owners(t).join(', '))}</span>` : ''}${t.due_date ? `<span>กำหนด ${fmtDue(t.due_date)}</span>` : ''}${t.done_at ? `<span>เสร็จ ${fmtDue(t.done_at)}</span>` : ''}</div></td>
+    .sort((a, b) => ({ daily: 0, once: 1, plan: 2, backlog: 3 }[a.type] ?? 1) - ({ daily: 0, once: 1, plan: 2, backlog: 3 }[b.type] ?? 1) || String(L.normDate(a.due_date) || '9').localeCompare(String(L.normDate(b.due_date) || '9')) || L.normTime(a.time).localeCompare(L.normTime(b.time)));
+  $('#mBody').innerHTML = list.length ? list.map(t => `<tr><td><b>${esc(t.title)}</b><div class="meta"><span class="tag ${t.type === 'once' ? '' : t.type}">${L.TYPE_LABEL[t.type] || 'ครั้งเดียว'}</span>${t.time ? `<span class="tag time">🕐 ${esc(L.normTime(t.time))}</span>` : ''}${t.owner ? `<span>👤 ${esc(L.owners(t).join(', '))}</span>` : ''}${t.type === 'plan' ? `<span>📆 ${fmtDue(t.start_date || t.created_at)} – ${fmtDue(t.due_date)}</span><span class="tag st st-${L.planInfo(t).state}">${L.planInfo(t).label}</span>` : t.due_date ? `<span>กำหนด ${fmtDue(t.due_date)}</span>` : ''}${t.done_at ? `<span>เสร็จ ${fmtDue(t.done_at)}</span>` : ''}</div></td>
     <td><button class="btn ghost sm" data-edit="${t.id}">แก้ไข</button> ${mStatus === 'open' ? `<button class="btn danger sm" data-ms="cancel" data-id="${t.id}">ยกเลิก</button>` : `<button class="btn ghost sm" data-ms="open" data-id="${t.id}">เปิดใหม่</button>`}</td></tr>`).join('') : '<tr><td class="empty">ไม่มีรายการ</td></tr>';
   $('#preview').textContent = L.morningMessage(Tasks, Logs, location.href.split('#')[0], { includeDaily: false });
 }
@@ -212,11 +266,14 @@ document.addEventListener('click', async e => {
   if (cb) {
     cb.disabled = true;
     if (cb.dataset.act === 'done' && !ME) askName();
-    try { if (cb.dataset.act === 'done') await markDone(cb.dataset.id); else await undoDone(cb.dataset.id); toast(cb.dataset.act === 'done' ? '✔ บันทึกงานเสร็จแล้ว' : 'ยกเลิกสถานะเสร็จแล้ว'); await loadToday(); }
+    try { if (cb.dataset.act === 'done') await markDone(cb.dataset.id); else await undoDone(cb.dataset.id); toast(cb.dataset.act === 'done' ? '✔ บันทึกงานเสร็จแล้ว' : 'ยกเลิกสถานะเสร็จแล้ว'); await (cb.dataset.from === 'schedule' ? loadSchedule() : loadToday()); }
     catch (err) { toast('ผิดพลาด: ' + err.message); cb.disabled = false; }
     return;
   }
   const chip = e.target.closest('#ownerFilter .chip'); if (chip) { ownerSel = chip.dataset.o; loadToday(); }
+  const gf = e.target.closest('#gFilter .chip'); if (gf) { gFilter = gf.dataset.g; document.querySelectorAll('#gFilter .chip').forEach(c => c.classList.toggle('on', c === gf)); loadSchedule(); }
+  const gr = e.target.closest('#gRange .chip'); if (gr) { gRange = +gr.dataset.r; document.querySelectorAll('#gRange .chip').forEach(c => c.classList.toggle('on', c === gr)); loadSchedule(); }
+  const go = e.target.closest('#gOwner .chip'); if (go) { gOwner = go.dataset.go; loadSchedule(); }
   const rc = e.target.closest('#rangeChips .chip'); if (rc) { histDays = +rc.dataset.d; document.querySelectorAll('#rangeChips .chip').forEach(c => c.classList.toggle('on', c === rc)); loadHistory(); }
   const mc = e.target.closest('#mFilter .chip'); if (mc) { mStatus = mc.dataset.s; document.querySelectorAll('#mFilter .chip').forEach(c => c.classList.toggle('on', c === mc)); loadManage(); }
   const hd = e.target.closest('.day .hd'); if (hd) hd.parentElement.querySelector('ul')?.classList.toggle('hidden');
@@ -335,7 +392,7 @@ document.addEventListener('click', async e => {
 // ---------------------------------------------------------------- ทั่วไป
 function askName() { const n = prompt('ชื่อของคุณ (ใช้บันทึกว่าใครเป็นคนทำงาน)', ME); if (n !== null) { ME = n.trim(); ls.set('me', ME); $('#meName').textContent = ME || 'ตั้งชื่อ'; } }
 $('#meBtn').onclick = askName; $('#meName').textContent = ME || 'ตั้งชื่อ';
-const views = { today: loadToday, history: loadHistory, add: loadAdd, manage: loadManage, master: loadMaster };
+const views = { today: loadToday, schedule: loadSchedule, history: loadHistory, add: loadAdd, manage: loadManage, master: loadMaster };
 function show(v, keepForm) {
   if (!store.signedIn) return showSignin();
   if (v === 'add' && !keepForm) resetForm();
