@@ -119,6 +119,13 @@ pre.preview{white-space:pre-wrap;background:var(--bg);border-radius:10px;padding
 select{appearance:auto}
 .muted{color:var(--muted);font-size:12px}
 details.card>summary{cursor:pointer;color:var(--muted);font-size:14px}
+.pick{display:flex;flex-wrap:wrap;gap:6px;min-height:42px;align-items:center}
+.pick label{display:inline-flex;align-items:center;margin:0;border:1px solid var(--line);border-radius:999px;padding:6px 12px;cursor:pointer;color:var(--ink);font-size:14px;background:var(--card)}
+.pick input{display:none}
+.pick label:has(input:checked){background:var(--brand-soft);border-color:var(--brand);color:var(--brand);font-weight:600}
+.pick label:has(input:checked)::before{content:"✓ "}
+.tag.backlog{background:#f3e8ff;color:#7c3aed}
+@media (prefers-color-scheme:dark){.tag.backlog{background:#2e1f47;color:#c4a5ff}}
 </style>
 </head>
 <body>
@@ -163,6 +170,11 @@ details.card>summary{cursor:pointer;color:var(--muted);font-size:14px}
       <div id="todoList"></div>
       <details id="upWrap" class="hidden"><summary>งานที่ยังไม่ถึงกำหนด (<span id="upCount"></span>)</summary><div id="upList"></div></details>
     </div>
+    <div class="card" id="backlogCard">
+      <h2>📝 รายการค้างทำ <span class="sub" id="backlogCount"></span></h2>
+      <div class="muted" style="margin:-6px 0 8px">งานที่ไม่มีกำหนดวัน — ไม่นับรวมใน KPI รายวัน</div>
+      <div id="backlogList"></div>
+    </div>
     <div class="card" id="ownerCard">
       <h2>KPI รายบุคคล <span class="sub">เป้าหมาย ≥ <span class="tgt"></span>%</span></h2>
       <div id="owners"></div>
@@ -206,16 +218,17 @@ details.card>summary{cursor:pointer;color:var(--muted);font-size:14px}
             <div class="seg">
               <label><input type="radio" name="type" value="once" checked><span>ครั้งเดียว / นัดหมาย</span></label>
               <label><input type="radio" name="type" value="daily"><span>ประจำวัน (ทำทุกวัน)</span></label>
+              <label><input type="radio" name="type" value="backlog"><span>รายการค้าง (ไม่มีกำหนดวัน)</span></label>
             </div>
           </div>
           <div id="dueWrap"><label>วันที่ (กำหนด/นัดหมาย)</label><input type="date" name="due_date"></div>
-          <div><label>เวลา (ถ้ามี)</label><input type="time" name="time"><div class="hint">ใส่เวลาเพื่อให้ LINE เด้งเตือน</div></div>
-          <div><label>แจ้งเตือน LINE ล่วงหน้า</label>
+          <div id="timeWrap"><label>เวลา (ถ้ามี)</label><input type="time" name="time"><div class="hint">ใส่เวลาเพื่อให้ LINE เด้งเตือน</div></div>
+          <div id="remindWrap"><label>แจ้งเตือน LINE ล่วงหน้า</label>
             <select name="remind_before">
               <option value="0">ตรงเวลา</option><option value="15">15 นาทีก่อน</option><option value="30" selected>30 นาทีก่อน</option>
               <option value="60">1 ชั่วโมงก่อน</option><option value="120">2 ชั่วโมงก่อน</option><option value="none">ไม่ต้องเตือน</option>
             </select></div>
-          <div><label>ผู้รับผิดชอบ <a href="#" class="mlink" data-goto="master">จัดการรายชื่อ</a></label><select name="owner"></select></div>
+          <div class="full"><label>ผู้รับผิดชอบ (เลือกได้หลายคน) <a href="#" class="mlink" data-goto="master">จัดการรายชื่อ</a></label><div class="pick" id="ownerPick"></div></div>
           <div><label>ความสำคัญ</label><select name="priority"><option>สูง</option><option selected>กลาง</option><option>ต่ำ</option></select></div>
           <div><label>กลุ่มงาน <a href="#" class="mlink" data-goto="master">จัดการกลุ่มงาน</a></label><select name="category"></select></div>
           <div class="full"><label>หมายเหตุ (แสดงในข้อความเตือน)</label><textarea name="note" rows="2" placeholder="เช่น สถานที่ / เบอร์ติดต่อ"></textarea></div>

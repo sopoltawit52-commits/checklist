@@ -83,7 +83,7 @@
   }
 
   class DemoStore {
-    constructor() { this.key = 'checklist-demo-v3'; }
+    constructor() { this.key = 'checklist-demo-v4'; }
     get demo() { return true; }
     get signedIn() { return true; }
     async signIn() {}

@@ -18,10 +18,12 @@
     add('สุ่มตรวจขนาดแผ่นพื้น (QC)', 'นภา', 'คุณภาพ', 'สูง', 'daily');
 
     add('นัดช่าง Siemens ตรวจ Inverter ไลน์ 2', 'วิชัย', 'ระบบควบคุม', 'สูง', 'once', d, '10:30', L.addDays(d, -3), '30');
-    add('ประชุมผู้รับเหมา Solar Rooftop หน้างาน', 'อรุณ', 'โครงการ', 'สูง', 'once', d, '13:00', L.addDays(d, -2), '60');
+    add('ประชุมผู้รับเหมา Solar Rooftop หน้างาน', 'อรุณ, วิชัย', 'โครงการ', 'สูง', 'once', d, '13:00', L.addDays(d, -2), '60');
     add('ส่งรายงานตรวจรับเครน', 'นภา', 'เอกสาร', 'กลาง', 'once', d, '', L.addDays(d, -2));
     add('เปลี่ยนสายพานมอเตอร์ปั๊มน้ำ P-02', 'สมชาย', 'ซ่อมบำรุง', 'สูง', 'once', L.addDays(d, -2), '', L.addDays(d, -5));
-    add('สั่งซื้อลูกปืน 6205 สำรอง 10 ตัว', 'สมชาย', 'จัดซื้อ', 'ต่ำ', 'once', '', '', L.addDays(d, -1));
+    add('สั่งซื้อลูกปืน 6205 สำรอง 10 ตัว', 'สมชาย', 'จัดซื้อ', 'ต่ำ', 'backlog', '', '', L.addDays(d, -1));
+    add('ทาสีราวบันไดทางเดินโรงงาน 1', 'สมชาย, วิชัย', 'ซ่อมบำรุง', 'กลาง', 'backlog', '', '', L.addDays(d, -6));
+    add('จัดระเบียบตู้อะไหล่ไฟฟ้า', 'วิชัย', 'ระบบควบคุม', 'สูง', 'backlog', '', '', L.addDays(d, -3));
     add('Backup โปรแกรม PLC S7-1200 ไลน์ 2', 'วิชัย', 'ระบบควบคุม', 'กลาง', 'once', L.addDays(d, 2), '09:00', L.addDays(d, -2), '30');
     add('ปรับปรุง WI ล้างแบบหล่อ (TH/EN)', 'นภา', 'เอกสาร', 'กลาง', 'once', L.addDays(d, 6), '', L.addDays(d, -1));
 
@@ -40,7 +42,7 @@
     const People = [['สมชาย', 'ช่างซ่อมบำรุง'], ['วิชัย', 'ช่างไฟฟ้า/PLC'], ['นภา', 'QC'], ['อรุณ', 'หัวหน้างาน']]
       .map(([name, position], i) => ({ id: 'P-' + (i + 1), name, position, phone: '', note: '', active: 'Y', created_at: ts }));
     const COLORS = ['#2563eb', '#16a34a', '#d97706', '#dc2626', '#7c3aed', '#0891b2', '#db2777', '#65a30d', '#475569'];
-    const Categories = [...new Set(T.map(t => t.category))].map((name, i) => ({ id: 'C-' + (i + 1), name, color: COLORS[i % COLORS.length], note: '', active: 'Y', created_at: ts }));
+    const Categories = [...new Set(T.map(t => t.category).filter(Boolean))].map((name, i) => ({ id: 'C-' + (i + 1), name, color: COLORS[i % COLORS.length], note: '', active: 'Y', created_at: ts }));
     return { Tasks: T, Logs: logs, Snapshots: [], Meta: [], People, Categories };
   };
 });

@@ -40,9 +40,9 @@ function taskRow(t, mode) {
   if (t.time) tags.push(`<span class="tag time">🕐 ${esc(t.time)}${t.remind_before && t.remind_before !== 'none' ? ' 🔔' : ''}</span>`);
   if (t.overdue) tags.push(`<span class="tag over">เกินกำหนด ${fmtDue(t.due_date)}</span>`);
   else if (t.type === 'once' && t.due_date) tags.push(`<span class="tag">${t.today ? 'วันนี้' : 'กำหนด ' + fmtDue(t.due_date)}</span>`);
-  tags.push(t.type === 'daily' ? '<span class="tag daily">ประจำวัน</span>' : '<span class="tag">ครั้งเดียว</span>');
+  tags.push(t.type === 'daily' ? '<span class="tag daily">ประจำวัน</span>' : t.type === 'backlog' ? '<span class="tag backlog">รายการค้าง</span>' : '<span class="tag">ครั้งเดียว</span>');
   if (t.priority === 'สูง') tags.push('<span class="tag high">สำคัญสูง</span>');
-  if (t.owner) tags.push(`<span>👤 ${esc(t.owner)}</span>`);
+  if (t.owner) tags.push(`<span>👤 ${esc(L.owners(t).join(', '))}</span>`);
   if (t.category) tags.push(`<span>${catDot(t.category)}${esc(t.category)}</span>`);
   if (mode === 'done') tags.push(`<span class="tag ok">✓ ${esc(t.done_time || '')}${t.done_by ? ' โดย ' + esc(t.done_by) : ''}</span>`);
   const cb = mode === 'up' ? '' : `<button class="cb" aria-label="${mode === 'done' ? 'ยกเลิกเสร็จ' : 'ทำเสร็จ'}" data-id="${t.id}" data-act="${mode === 'done' ? 'undo' : 'done'}"></button>`;
@@ -71,11 +71,14 @@ async function loadToday() {
 
   $('#ownerCard').classList.toggle('hidden', !d.byOwner.length);
   $('#owners').innerHTML = d.byOwner.map(o => `<div class="owner"><span>${esc(o.owner)}</span><div class="track"><div class="fill" style="width:${o.pct}%;background:${colorFor(o.pct)}"></div></div><span class="num">${o.done}/${o.planned} · ${o.pct}%</span></div>`).join('');
-  const owners = ['ทั้งหมด', ...new Set([...d.todo, ...d.completed, ...d.upcoming].map(t => t.owner || 'ไม่ระบุ'))];
+  const owners = ['ทั้งหมด', ...new Set([...d.todo, ...d.completed, ...d.upcoming, ...d.backlog].flatMap(t => L.owners(t).length ? L.owners(t) : ['ไม่ระบุ']))];
   if (!owners.includes(ownerSel)) ownerSel = 'ทั้งหมด';
   $('#ownerFilter').innerHTML = owners.map(o => `<button class="chip ${o === ownerSel ? 'on' : ''}" data-o="${esc(o)}">${esc(o)}</button>`).join('');
-  const f = list => (ownerSel === 'ทั้งหมด' ? list : list.filter(t => (t.owner || 'ไม่ระบุ') === ownerSel));
-  const todo = f(d.todo), done = f(d.completed), up = f(d.upcoming);
+  const f = list => (ownerSel === 'ทั้งหมด' ? list : list.filter(t => (L.owners(t).length ? L.owners(t) : ['ไม่ระบุ']).includes(ownerSel)));
+  const todo = f(d.todo), done = f([...d.completed, ...d.backlogDone]), up = f(d.upcoming), bl = f(d.backlog);
+  $('#backlogCard').classList.toggle('hidden', !d.backlog.length);
+  $('#backlogCount').textContent = `${bl.length} รายการ`;
+  $('#backlogList').innerHTML = bl.length ? bl.map(t => taskRow(t, 'todo')).join('') : '<div class="empty">ไม่มีรายการค้างของคนนี้</div>';
   $('#leftCount').textContent = `${todo.length} รายการ`;
   $('#doneCount').textContent = `${done.length} รายการ`;
   $('#todoList').innerHTML = todo.length ? todo.map(t => taskRow(t, 'todo')).join('') : '<div class="empty">🎉 ไม่มีงานค้าง</div>';
@@ -90,14 +93,14 @@ async function markDone(id) {
   const n = L.nowParts();
   if (Logs.some(l => l.task_id === id && L.normDate(l.date) === n.date && l.void !== 'Y')) return;
   await store.append('Logs', { log_id: L.newId('L'), date: n.date, time: n.time.slice(0, 5), task_id: id, title: t.title, owner: t.owner, done_by: ME, type: t.type, note: '', void: '' });
-  if (t.type === 'once') await store.update('Tasks', 'id', id, { status: 'done', done_at: `${n.date} ${n.time}` });
+  if (t.type !== 'daily') await store.update('Tasks', 'id', id, { status: 'done', done_at: `${n.date} ${n.time}` });
 }
 async function undoDone(id) {
   const { Tasks, Logs } = await refresh();
   const t = Tasks.find(x => x.id === id); if (!t) throw new Error('ไม่พบงาน');
   const log = Logs.find(l => l.task_id === id && L.normDate(l.date) === L.today() && l.void !== 'Y');
   if (log) await store.update('Logs', 'log_id', log.log_id, { void: 'Y' });
-  if (t.type === 'once') await store.update('Tasks', 'id', id, { status: 'open', done_at: '' });
+  if (t.type !== 'daily') await store.update('Tasks', 'id', id, { status: 'open', done_at: '' });
 }
 
 // ---------------------------------------------------------------- ประวัติ
@@ -129,14 +132,21 @@ function fillLists() {
     if (cur && ![...sel.options].some(o => o.value === cur)) sel.insertAdjacentHTML('beforeend', `<option value="${esc(cur)}">${esc(cur)} (ไม่อยู่ในรายชื่อ)</option>`);
     sel.value = cur;
   };
-  setOpts(f.elements['owner'], people, people.length ? '— เลือกผู้รับผิดชอบ —' : '— ยังไม่มีรายชื่อ (เพิ่มที่ ข้อมูลหลัก) —', p => p.position ? `${p.name} (${p.position})` : p.name);
+  const box = $('#ownerPick');
+  const sel = new Set([...box.querySelectorAll('input:checked')].map(i => i.value));
+  const extra = [...sel].filter(n => !people.some(p => p.name === n));
+  box.innerHTML = people.length || extra.length
+    ? [...people.map(p => ({ name: p.name, label: p.position ? `${p.name} (${p.position})` : p.name })), ...extra.map(n => ({ name: n, label: n + ' (ไม่อยู่ในรายชื่อ)' }))]
+        .map(p => `<label><input type="checkbox" name="owner_pick" value="${esc(p.name)}" ${sel.has(p.name) ? 'checked' : ''}>${esc(p.label)}</label>`).join('')
+    : '<span class="muted">ยังไม่มีรายชื่อ — กด "จัดการรายชื่อ" เพื่อเพิ่ม</span>';
   setOpts(f.elements['category'], cats, cats.length ? '— เลือกกลุ่มงาน —' : '— ยังไม่มีกลุ่มงาน (เพิ่มที่ ข้อมูลหลัก) —', c => c.name);
 }
 async function loadAdd() { await refresh(); fillLists(); }
 function resetForm() {
   const f = $('#addForm'); f.reset(); f.elements['task_id'].value = '';
   $('#formTitle').textContent = '➕ เพิ่มรายการงาน'; $('#saveBtn').textContent = 'บันทึกงาน';
-  $('#cancelEdit').classList.add('hidden'); $('#dueWrap').classList.remove('hidden');
+  $('#cancelEdit').classList.add('hidden'); applyType('once');
+  $('#ownerPick').querySelectorAll('input').forEach(i => (i.checked = false));
   f.elements['due_date'].value = L.today();
 }
 function editTask(id) {
@@ -144,22 +154,32 @@ function editTask(id) {
   show('add', true);
   const f = $('#addForm');
   fillLists();
-  for (const [k, v] of [['owner', t.owner], ['category', t.category]]) { const sel = f.elements[k]; if (v && ![...sel.options].some(o => o.value === v)) sel.insertAdjacentHTML('beforeend', `<option value="${esc(v)}">${esc(v)}</option>`); }
-  f.elements['task_id'].value = t.id; f.elements['title'].value = t.title; f.elements['owner'].value = t.owner; f.elements['category'].value = t.category; f.elements['priority'].value = t.priority || 'กลาง';
-  f.querySelector(`[name=type][value=${t.type === 'daily' ? 'daily' : 'once'}]`).checked = true;
+  { const sel = f.elements['category'], v = t.category; if (v && ![...sel.options].some(o => o.value === v)) sel.insertAdjacentHTML('beforeend', `<option value="${esc(v)}">${esc(v)}</option>`); }
+  const box = $('#ownerPick'), want = L.owners(t);
+  for (const n of want) if (![...box.querySelectorAll('input')].some(i => i.value === n)) box.insertAdjacentHTML('beforeend', `<label><input type="checkbox" name="owner_pick" value="${esc(n)}">${esc(n)}</label>`);
+  box.querySelectorAll('input').forEach(i => (i.checked = want.includes(i.value)));
+  f.elements['task_id'].value = t.id; f.elements['title'].value = t.title; f.elements['category'].value = t.category; f.elements['priority'].value = t.priority || 'กลาง';
+  const ty = ['daily', 'backlog'].includes(t.type) ? t.type : 'once';
+  f.querySelector(`[name=type][value=${ty}]`).checked = true;
   f.elements['due_date'].value = L.normDate(t.due_date); f.elements['time'].value = L.normTime(t.time); f.elements['remind_before'].value = t.remind_before || '30'; f.elements['note'].value = t.note;
-  $('#dueWrap').classList.toggle('hidden', t.type === 'daily');
+  applyType(ty);
   $('#formTitle').textContent = '✏️ แก้ไขงาน'; $('#saveBtn').textContent = 'บันทึกการแก้ไข'; $('#cancelEdit').classList.remove('hidden');
 }
 $('#cancelEdit').onclick = () => { resetForm(); show('manage'); };
-$('#addForm').addEventListener('change', e => { if (e.target.name === 'type') $('#dueWrap').classList.toggle('hidden', e.target.value === 'daily'); });
+function applyType(ty) {
+  $('#dueWrap').classList.toggle('hidden', ty !== 'once');
+  $('#timeWrap').classList.toggle('hidden', ty === 'backlog');
+  $('#remindWrap').classList.toggle('hidden', ty === 'backlog');
+}
+$('#addForm').addEventListener('change', e => { if (e.target.name === 'type') applyType(e.target.value); });
 $('#addForm').addEventListener('submit', async e => {
   e.preventDefault();
   const fd = Object.fromEntries(new FormData(e.target));
+  fd.owner = [...e.target.querySelectorAll('[name=owner_pick]:checked')].map(i => i.value).join(', ');
   const btn = $('#saveBtn'); btn.disabled = true;
   const data = {
     title: fd.title.trim(), owner: (fd.owner || '').trim(), category: (fd.category || '').trim(), priority: fd.priority,
-    type: fd.type, due_date: fd.type === 'daily' ? '' : fd.due_date, time: fd.time || '', remind_before: fd.time ? fd.remind_before : '', note: fd.note || '',
+    type: fd.type, due_date: fd.type === 'once' ? fd.due_date : '', time: fd.type === 'backlog' ? '' : (fd.time || ''), remind_before: fd.type !== 'backlog' && fd.time ? fd.remind_before : '', note: fd.note || '',
   };
   try {
     if (fd.task_id) {
@@ -180,8 +200,8 @@ $('#addForm').addEventListener('submit', async e => {
 async function loadManage() {
   const { Tasks, Logs } = await refresh();
   const list = Tasks.filter(t => (t.status || 'open') === mStatus)
-    .sort((a, b) => (a.type === b.type ? 0 : a.type === 'daily' ? -1 : 1) || String(L.normDate(a.due_date) || '9').localeCompare(String(L.normDate(b.due_date) || '9')) || L.normTime(a.time).localeCompare(L.normTime(b.time)));
-  $('#mBody').innerHTML = list.length ? list.map(t => `<tr><td><b>${esc(t.title)}</b><div class="meta"><span class="tag ${t.type === 'daily' ? 'daily' : ''}">${t.type === 'daily' ? 'ประจำวัน' : 'ครั้งเดียว'}</span>${t.time ? `<span class="tag time">🕐 ${esc(L.normTime(t.time))}</span>` : ''}${t.owner ? `<span>👤 ${esc(t.owner)}</span>` : ''}${t.due_date ? `<span>กำหนด ${fmtDue(t.due_date)}</span>` : ''}${t.done_at ? `<span>เสร็จ ${fmtDue(t.done_at)}</span>` : ''}</div></td>
+    .sort((a, b) => ({ daily: 0, once: 1, backlog: 2 }[a.type] ?? 1) - ({ daily: 0, once: 1, backlog: 2 }[b.type] ?? 1) || String(L.normDate(a.due_date) || '9').localeCompare(String(L.normDate(b.due_date) || '9')) || L.normTime(a.time).localeCompare(L.normTime(b.time)));
+  $('#mBody').innerHTML = list.length ? list.map(t => `<tr><td><b>${esc(t.title)}</b><div class="meta"><span class="tag ${t.type === 'once' ? '' : t.type}">${L.TYPE_LABEL[t.type] || 'ครั้งเดียว'}</span>${t.time ? `<span class="tag time">🕐 ${esc(L.normTime(t.time))}</span>` : ''}${t.owner ? `<span>👤 ${esc(L.owners(t).join(', '))}</span>` : ''}${t.due_date ? `<span>กำหนด ${fmtDue(t.due_date)}</span>` : ''}${t.done_at ? `<span>เสร็จ ${fmtDue(t.done_at)}</span>` : ''}</div></td>
     <td><button class="btn ghost sm" data-edit="${t.id}">แก้ไข</button> ${mStatus === 'open' ? `<button class="btn danger sm" data-ms="cancel" data-id="${t.id}">ยกเลิก</button>` : `<button class="btn ghost sm" data-ms="open" data-id="${t.id}">เปิดใหม่</button>`}</td></tr>`).join('') : '<tr><td class="empty">ไม่มีรายการ</td></tr>';
   $('#preview').textContent = L.morningMessage(Tasks, Logs, location.href.split('#')[0], { includeDaily: false });
 }
@@ -214,7 +234,8 @@ const MASTER = {
   p: { tab: 'People', field: 'owner', form: '#pForm', body: '#pBody', count: '#pCount', label: 'รายชื่อ', idp: 'P' },
   c: { tab: 'Categories', field: 'category', form: '#cForm', body: '#cBody', count: '#cCount', label: 'กลุ่มงาน', idp: 'C' },
 };
-const usage = (field, name) => DATA.Tasks.filter(t => t[field] === name && t.status !== 'cancel').length;
+const hasVal = (t, field, name) => field === 'owner' ? L.owners(t).includes(name) : t[field] === name;
+const usage = (field, name) => DATA.Tasks.filter(t => hasVal(t, field, name) && t.status !== 'cancel').length;
 async function loadMaster() {
   await refresh();
   for (const k of ['p', 'c']) {
@@ -226,7 +247,7 @@ async function loadMaster() {
       <td><button class="btn ghost sm" data-medit="${k}:${r.id}">แก้ไข</button> <button class="btn danger sm" data-mdel="${k}:${r.id}">ลบ</button></td></tr>`).join('')
       : `<tr><td class="empty">ยังไม่มี${m.label} — กรอกด้านบนแล้วกด "เพิ่ม"</td></tr>`;
     const names = new Set((DATA[m.tab] || []).map(r => r.name));
-    const fromTasks = [...new Set(DATA.Tasks.map(t => t[m.field]).filter(v => v && !names.has(v)))];
+    const fromTasks = [...new Set(DATA.Tasks.flatMap(t => (m.field === 'owner' ? L.owners(t) : [t[m.field]])).filter(v => v && !names.has(v)))];
     $(k === 'p' ? '#importPeople' : '#importCats').classList.toggle('hidden', !fromTasks.length);
   }
   const del = ['p', 'c'].flatMap(k => (DATA[MASTER[k].tab] || []).filter(r => r.active === 'N').map(r => ({ k, r })));
@@ -251,11 +272,11 @@ for (const k of ['p', 'c']) {
       const data = k === 'p' ? { name, position: (fd.position || '').trim(), phone: (fd.phone || '').trim() } : { name, note: (fd.note || '').trim(), color: fd.color };
       if (fd.rid) {
         const oldName = (DATA[m.tab].find(r => r.id === fd.rid) || {}).name;
-        const affected = oldName && oldName !== name ? DATA.Tasks.filter(t => t[m.field] === oldName) : [];
+        const affected = oldName && oldName !== name ? DATA.Tasks.filter(t => hasVal(t, m.field, oldName)) : [];
         await store.update(m.tab, 'id', fd.rid, data);
         if (affected.length) {
           if (confirm(`เปลี่ยนชื่อในงานที่ใช้ "${oldName}" อยู่ ${affected.length} รายการ เป็น "${name}" ด้วยไหม?`))
-            for (const t of affected) await store.update('Tasks', 'id', t.id, { [m.field]: name });
+            for (const t of affected) await store.update('Tasks', 'id', t.id, { [m.field]: m.field === 'owner' ? L.owners(t).map(x => (x === oldName ? name : x)).join(', ') : name });
         }
         toast('✔ บันทึกการแก้ไขแล้ว');
       } else {
@@ -272,7 +293,7 @@ async function importFromTasks(k) {
   const m = MASTER[k];
   await refresh();
   const names = new Set((DATA[m.tab] || []).map(r => r.name));
-  const list = [...new Set(DATA.Tasks.map(t => t[m.field]).filter(v => v && !names.has(v)))];
+  const list = [...new Set(DATA.Tasks.flatMap(t => (m.field === 'owner' ? L.owners(t) : [t[m.field]])).filter(v => v && !names.has(v)))];
   if (!list.length || !confirm(`นำเข้า ${list.length} รายการ: ${list.join(', ')} ?`)) return;
   const n = L.nowParts(), COLORS = ['#2563eb', '#16a34a', '#d97706', '#dc2626', '#7c3aed', '#0891b2', '#db2777', '#65a30d'];
   for (const [i, name] of list.entries())

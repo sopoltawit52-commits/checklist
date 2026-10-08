@@ -46,19 +46,31 @@
   const isWorkDay = dateStr => WORK_DAYS.has(new Date(dateStr + 'T00:00:00Z').getUTCDay());
   const newId = p => p + '-' + Date.now().toString(36).toUpperCase() + Math.random().toString(16).slice(2, 6).toUpperCase();
   const PRIO_RANK = { 'สูง': 0, 'กลาง': 1, 'ต่ำ': 2 };
+  // ผู้รับผิดชอบหลายคน เก็บเป็น "ชื่อ1, ชื่อ2"
+  const owners = t => String((t && t.owner) || '').split(/\s*,\s*/).map(x => x.trim()).filter(Boolean);
+  const TYPE_LABEL = { daily: 'ประจำวัน', once: 'ครั้งเดียว', backlog: 'รายการค้าง' };
 
   // ---------------------------------------------------------------- ภาพรวมของวัน
   function buildDay(tasks, logs, date) {
     const workDay = isWorkDay(date);
     const dayLogs = logs.filter(l => normDate(l.date) === date && l.void !== 'Y');
     const doneIds = new Map(dayLogs.map(l => [l.task_id, l]));
-    const items = [];
+    const items = [], backlog = [], backlogDone = [];
     for (const raw of tasks) {
       const t = { ...raw, time: normTime(raw.time), due_date: normDate(raw.due_date) };
       const created = normDate(t.created_at);
       if (created && created > date) continue;
       if (t.status === 'cancel') continue;
       const due = t.due_date;
+      if (t.type === 'backlog') { // รายการค้าง ไม่มีกำหนดวัน — ไม่นับเข้า KPI รายวัน
+        const doneDate = normDate(t.done_at);
+        if (t.status === 'done') {
+          if (doneDate === date) { const log = doneIds.get(t.id); backlogDone.push({ ...t, done: true, done_time: log ? log.time : '', done_by: log ? log.done_by : '' }); }
+          continue;
+        }
+        backlog.push({ ...t, done: false });
+        continue;
+      }
       if (t.type === 'daily') {
         const log = doneIds.get(t.id);
         if (!workDay && !log) continue;
@@ -81,9 +93,10 @@
     const done = planned.filter(i => i.done).length;
     const byOwner = {};
     for (const i of planned) {
-      const o = i.owner || 'ไม่ระบุ';
-      byOwner[o] = byOwner[o] || { owner: o, planned: 0, done: 0 };
-      byOwner[o].planned++; if (i.done) byOwner[o].done++;
+      for (const o of (owners(i).length ? owners(i) : ['ไม่ระบุ'])) {
+        byOwner[o] = byOwner[o] || { owner: o, planned: 0, done: 0 };
+        byOwner[o].planned++; if (i.done) byOwner[o].done++;
+      }
     }
     Object.values(byOwner).forEach(o => (o.pct = o.planned ? Math.round((o.done / o.planned) * 100) : 0));
     const sort = (a, b) => (b.overdue - a.overdue) || (a.time || '99').localeCompare(b.time || '99') || ((PRIO_RANK[a.priority] ?? 1) - (PRIO_RANK[b.priority] ?? 1)) || String(a.due_date || '9').localeCompare(String(b.due_date || '9'));
@@ -95,6 +108,8 @@
       todo: planned.filter(i => !i.done).sort(sort),
       completed: planned.filter(i => i.done).sort((a, b) => String(a.done_time).localeCompare(String(b.done_time))),
       upcoming: items.filter(i => i.upcoming).sort(sort),
+      backlog: backlog.sort((a, b) => ((PRIO_RANK[a.priority] ?? 1) - (PRIO_RANK[b.priority] ?? 1)) || String(a.created_at).localeCompare(String(b.created_at))),
+      backlogDone,
     };
   }
 
@@ -160,6 +175,12 @@
       if (pending.length > 30) L.push(`…และอีก ${pending.length - 30} รายการ`);
     } else L.push('✅ ไม่มีงานค้าง');
 
+    if (day.backlog.length && opt.includeBacklog !== false) {
+      L.push('', `📝 รายการค้างทำ (${day.backlog.length})`);
+      day.backlog.slice(0, 30).forEach(t => L.push(`${t.priority === 'สูง' ? '🟠' : '▫️'} ${t.title}${who(t)}`));
+      if (day.backlog.length > 30) L.push(`…และอีก ${day.backlog.length - 30} รายการ`);
+    }
+
     if (day.upcoming.length && opt.includeUpcoming !== false) {
       const soon = day.upcoming.filter(t => t.due_date <= addDays(d, 3));
       if (soon.length) { L.push('', `🗓️ ใกล้ถึงกำหนด (3 วัน)`); soon.forEach(t => L.push(`▫️ ${shortDate(t.due_date)}${t.time ? ' ' + t.time : ''} ${t.title}${who(t)}`)); }
@@ -181,5 +202,5 @@
     return L.join('\n');
   }
 
-  return { SCHEMA, TZ, nowParts, today, addDays, normDate, normTime, toMin, fromMin, setWorkDays, isWorkDay, newId, buildDay, buildHistory, dueReminders, morningMessage, reminderMessage };
+  return { owners, TYPE_LABEL, SCHEMA, TZ, nowParts, today, addDays, normDate, normTime, toMin, fromMin, setWorkDays, isWorkDay, newId, buildDay, buildHistory, dueReminders, morningMessage, reminderMessage };
 });
