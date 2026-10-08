@@ -20,11 +20,52 @@ const nowMin = () => L.toMin(L.nowParts().time);
 const activeRows = rows => (rows || []).filter(r => r.active !== 'N');
 const catDot = name => { const c = (DATA && activeRows(DATA.Categories).find(x => x.name === name)) || null; return c && c.color ? `<i class="dot" style="background:${esc(c.color)}"></i>` : '· '; };
 
-async function refresh() {
-  if (!inited) { await store.init(); inited = true; }
-  DATA = await store.loadAll();
-  return DATA;
+// ---------------------------------------------------------------- โหลดข้อมูล: แสดงของที่มีทันที แล้วอัปเดตเบื้องหลัง
+const CACHE_KEY = 'data-cache-v1', STALE_MS = 15000;
+let loadedAt = 0, inflight = null, curView = '', syncErr = '';
+function setSync() {
+  const el = $('#sync'); if (!el) return;
+  if (inflight) { el.textContent = '⟳ กำลังอัปเดต…'; el.className = 'sync'; }
+  else if (syncErr) { el.textContent = '⚠ ' + syncErr; el.className = 'sync err'; el.title = 'กดเพื่อลองใหม่'; }
+  else el.className = 'sync hidden';
 }
+function setData(d) {
+  DATA = d; loadedAt = Date.now(); syncErr = '';
+  if (!store.demo) { try { localStorage.setItem(CACHE_KEY, JSON.stringify(d)); } catch {} }
+  setSync();
+}
+if (!store.demo) { try { const c = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); if (c && c.Tasks) DATA = c; } catch {} }
+function fetchData(fresh) {
+  if (!inflight) {
+    inflight = (async () => {
+      if (!inited) { await store.init(); inited = true; }
+      const d = await store.loadAll(fresh);
+      setData(d); return d;
+    })().catch(e => { syncErr = DATA ? 'เชื่อมต่อไม่ได้ — แสดงข้อมูลล่าสุดที่มี' : ''; throw e; })
+      .finally(() => { inflight = null; setSync(); });
+    setSync();
+  }
+  return inflight;
+}
+function rerender() { if (curView && curView !== 'add' && views[curView]) views[curView]().catch(() => {}); }
+async function refresh(force) {
+  if (DATA && !force) {
+    if (Date.now() - loadedAt > STALE_MS) fetchData().then(rerender).catch(() => {});
+    return DATA;
+  }
+  return fetchData(force === 'fresh');
+}
+// เขียนหลายคำสั่งในครั้งเดียว แล้วใช้ข้อมูลล่าสุดที่เซิร์ฟเวอร์ส่งกลับ (ไม่ต้องโหลดซ้ำ)
+async function write(ops) {
+  inflight || setSyncBusy(true);
+  try {
+    store.lastData = null;
+    const row = await store.batch(ops);
+    if (store.lastData) setData(store.lastData); else await fetchData(true);
+    return row;
+  } finally { setSyncBusy(false); }
+}
+function setSyncBusy(b) { const el = $('#sync'); if (!el) return; if (b) { el.textContent = '⟳ กำลังบันทึก…'; el.className = 'sync'; } else setSync(); }
 
 function ring(p) {
   const r = 58, c = 2 * Math.PI * r, off = c * (1 - p / 100);
@@ -97,19 +138,22 @@ async function loadToday() {
 }
 
 async function markDone(id) {
-  const { Tasks, Logs } = await refresh();
+  const { Tasks, Logs } = DATA || (await refresh());
   const t = Tasks.find(x => x.id === id); if (!t) throw new Error('ไม่พบงาน');
   const n = L.nowParts();
   if (Logs.some(l => l.task_id === id && L.normDate(l.date) === n.date && l.void !== 'Y')) return;
-  await store.append('Logs', { log_id: L.newId('L'), date: n.date, time: n.time.slice(0, 5), task_id: id, title: t.title, owner: t.owner, done_by: ME, type: t.type, note: '', void: '' });
-  if (t.type !== 'daily') await store.update('Tasks', 'id', id, { status: 'done', done_at: `${n.date} ${n.time}` });
+  const ops = [{ action: 'append', tab: 'Logs', obj: { log_id: L.newId('L'), date: n.date, time: n.time.slice(0, 5), task_id: id, title: t.title, owner: t.owner, done_by: ME, type: t.type, note: '', void: '' } }];
+  if (t.type !== 'daily') ops.push({ action: 'update', tab: 'Tasks', keyField: 'id', key: id, patch: { status: 'done', done_at: `${n.date} ${n.time}` } });
+  await write(ops);
 }
 async function undoDone(id) {
-  const { Tasks, Logs } = await refresh();
+  const { Tasks, Logs } = DATA || (await refresh());
   const t = Tasks.find(x => x.id === id); if (!t) throw new Error('ไม่พบงาน');
+  const ops = [];
   const log = Logs.find(l => l.task_id === id && L.normDate(l.date) === L.today() && l.void !== 'Y');
-  if (log) await store.update('Logs', 'log_id', log.log_id, { void: 'Y' });
-  if (t.type !== 'daily') await store.update('Tasks', 'id', id, { status: 'open', done_at: '' });
+  if (log) ops.push({ action: 'update', tab: 'Logs', keyField: 'log_id', key: log.log_id, patch: { void: 'Y' } });
+  if (t.type !== 'daily') ops.push({ action: 'update', tab: 'Tasks', keyField: 'id', key: id, patch: { status: 'open', done_at: '' } });
+  if (ops.length) await write(ops);
 }
 
 // ---------------------------------------------------------------- สเก็ตดูล (Gantt)
@@ -239,11 +283,11 @@ $('#addForm').addEventListener('submit', async e => {
     if (fd.task_id) {
       const old = DATA.Tasks.find(x => x.id === fd.task_id);
       const changedTime = old && (L.normDate(old.due_date) !== data.due_date || L.normTime(old.time) !== data.time || old.remind_before !== data.remind_before);
-      await store.update('Tasks', 'id', fd.task_id, { ...data, ...(changedTime ? { reminded: '' } : {}) });
+      await write([{ action: 'update', tab: 'Tasks', keyField: 'id', key: fd.task_id, patch: { ...data, ...(changedTime ? { reminded: '' } : {}) } }]);
       toast('✔ บันทึกการแก้ไขแล้ว'); resetForm(); show('manage');
     } else {
       const n = L.nowParts();
-      await store.append('Tasks', { id: L.newId('T'), ...data, status: 'open', created_at: `${n.date} ${n.time}`, created_by: ME, done_at: '', reminded: '' });
+      await write([{ action: 'append', tab: 'Tasks', obj: { id: L.newId('T'), ...data, status: 'open', created_at: `${n.date} ${n.time}`, created_by: ME, done_at: '', reminded: '' } }]);
       toast('✔ เพิ่มงานแล้ว'); resetForm(); loadAdd();
     }
   } catch (err) { toast('ผิดพลาด: ' + err.message); }
@@ -265,9 +309,10 @@ document.addEventListener('click', async e => {
   const cb = e.target.closest('.cb');
   if (cb) {
     cb.disabled = true;
+    const row = cb.closest('.task, .g-row'); row && row.classList.toggle('done', cb.dataset.act === 'done'); row && (row.style.opacity = '.6');
     if (cb.dataset.act === 'done' && !ME) askName();
     try { if (cb.dataset.act === 'done') await markDone(cb.dataset.id); else await undoDone(cb.dataset.id); toast(cb.dataset.act === 'done' ? '✔ บันทึกงานเสร็จแล้ว' : 'ยกเลิกสถานะเสร็จแล้ว'); await (cb.dataset.from === 'schedule' ? loadSchedule() : loadToday()); }
-    catch (err) { toast('ผิดพลาด: ' + err.message); cb.disabled = false; }
+    catch (err) { toast('ผิดพลาด: ' + err.message); cb.disabled = false; if (row) { row.classList.toggle('done', cb.dataset.act !== 'done'); row.style.opacity = ''; } }
     return;
   }
   const chip = e.target.closest('#ownerFilter .chip'); if (chip) { ownerSel = chip.dataset.o; loadToday(); }
@@ -281,7 +326,8 @@ document.addEventListener('click', async e => {
   const ms = e.target.closest('[data-ms]');
   if (ms) {
     if (ms.dataset.ms === 'cancel' && !confirm('ยกเลิกงานนี้? (ประวัติเดิมยังอยู่ เปิดใหม่ได้)')) return;
-    try { await store.update('Tasks', 'id', ms.dataset.id, { status: ms.dataset.ms, ...(ms.dataset.ms === 'open' ? { done_at: '' } : {}) }); toast('อัปเดตแล้ว'); loadManage(); } catch (err) { toast(err.message); }
+    ms.disabled = true;
+    try { await write([{ action: 'update', tab: 'Tasks', keyField: 'id', key: ms.dataset.id, patch: { status: ms.dataset.ms, ...(ms.dataset.ms === 'open' ? { done_at: '' } : {}) } }]); toast('อัปเดตแล้ว'); loadManage(); } catch (err) { toast(err.message); ms.disabled = false; }
   }
 });
 
@@ -323,22 +369,20 @@ for (const k of ['p', 'c']) {
     if (!name) return;
     const btn = f.querySelector('[type=submit]'); btn.disabled = true;
     try {
-      await refresh();
       const dup = activeRows(DATA[m.tab]).find(r => r.name === name && r.id !== fd.rid);
       if (dup) throw new Error(`มี "${name}" อยู่แล้ว`);
       const data = k === 'p' ? { name, position: (fd.position || '').trim(), phone: (fd.phone || '').trim() } : { name, note: (fd.note || '').trim(), color: fd.color };
       if (fd.rid) {
         const oldName = (DATA[m.tab].find(r => r.id === fd.rid) || {}).name;
         const affected = oldName && oldName !== name ? DATA.Tasks.filter(t => hasVal(t, m.field, oldName)) : [];
-        await store.update(m.tab, 'id', fd.rid, data);
-        if (affected.length) {
-          if (confirm(`เปลี่ยนชื่อในงานที่ใช้ "${oldName}" อยู่ ${affected.length} รายการ เป็น "${name}" ด้วยไหม?`))
-            for (const t of affected) await store.update('Tasks', 'id', t.id, { [m.field]: m.field === 'owner' ? L.owners(t).map(x => (x === oldName ? name : x)).join(', ') : name });
-        }
+        const ops = [{ action: 'update', tab: m.tab, keyField: 'id', key: fd.rid, patch: data }];
+        if (affected.length && confirm(`เปลี่ยนชื่อในงานที่ใช้ "${oldName}" อยู่ ${affected.length} รายการ เป็น "${name}" ด้วยไหม?`))
+          for (const t of affected) ops.push({ action: 'update', tab: 'Tasks', keyField: 'id', key: t.id, patch: { [m.field]: m.field === 'owner' ? L.owners(t).map(x => (x === oldName ? name : x)).join(', ') : name } });
+        await write(ops);
         toast('✔ บันทึกการแก้ไขแล้ว');
       } else {
         const n = L.nowParts();
-        await store.append(m.tab, { id: L.newId(m.idp), ...data, active: 'Y', created_at: `${n.date} ${n.time}` });
+        await write([{ action: 'append', tab: m.tab, obj: { id: L.newId(m.idp), ...data, active: 'Y', created_at: `${n.date} ${n.time}` } }]);
         toast(`✔ เพิ่ม${m.label}แล้ว`);
       }
       resetMasterForm(k); await loadMaster();
@@ -353,9 +397,8 @@ async function importFromTasks(k) {
   const list = [...new Set(DATA.Tasks.flatMap(t => (m.field === 'owner' ? L.owners(t) : [t[m.field]])).filter(v => v && !names.has(v)))];
   if (!list.length || !confirm(`นำเข้า ${list.length} รายการ: ${list.join(', ')} ?`)) return;
   const n = L.nowParts(), COLORS = ['#2563eb', '#16a34a', '#d97706', '#dc2626', '#7c3aed', '#0891b2', '#db2777', '#65a30d'];
-  for (const [i, name] of list.entries())
-    await store.append(m.tab, k === 'p' ? { id: L.newId('P'), name, position: '', phone: '', note: '', active: 'Y', created_at: `${n.date} ${n.time}` }
-      : { id: L.newId('C'), name, color: COLORS[i % COLORS.length], note: '', active: 'Y', created_at: `${n.date} ${n.time}` });
+  await write(list.map((name, i) => ({ action: 'append', tab: m.tab, obj: k === 'p' ? { id: L.newId('P'), name, position: '', phone: '', note: '', active: 'Y', created_at: `${n.date} ${n.time}` }
+      : { id: L.newId('C'), name, color: COLORS[i % COLORS.length], note: '', active: 'Y', created_at: `${n.date} ${n.time}` } })));
   toast(`✔ นำเข้า ${list.length} รายการแล้ว`); loadMaster();
 }
 $('#importPeople').onclick = () => importFromTasks('p').catch(e => toast(e.message));
@@ -379,13 +422,13 @@ document.addEventListener('click', async e => {
     const [k, id] = dl.dataset.mdel.split(':'), m = MASTER[k], r = DATA[m.tab].find(x => x.id === id);
     const used = usage(m.field, r.name);
     if (!confirm(`ลบ "${r.name}"?${used ? `\n(มีงานที่ใช้อยู่ ${used} รายการ — งานเดิมยังคงชื่อนี้ไว้)` : ''}\nกู้คืนได้ที่ "แสดงรายการที่ลบแล้ว"`)) return;
-    try { await store.update(m.tab, 'id', id, { active: 'N' }); toast('ลบแล้ว'); loadMaster(); } catch (err) { toast(err.message); }
+    try { await write([{ action: 'update', tab: m.tab, keyField: 'id', key: id, patch: { active: 'N' } }]); toast('ลบแล้ว'); loadMaster(); } catch (err) { toast(err.message); }
     return;
   }
   const rs = e.target.closest('[data-mrestore]');
   if (rs) {
     const [k, id] = rs.dataset.mrestore.split(':');
-    try { await store.update(MASTER[k].tab, 'id', id, { active: 'Y' }); toast('กู้คืนแล้ว'); loadMaster(); } catch (err) { toast(err.message); }
+    try { await write([{ action: 'update', tab: MASTER[k].tab, keyField: 'id', key: id, patch: { active: 'Y' } }]); toast('กู้คืนแล้ว'); loadMaster(); } catch (err) { toast(err.message); }
   }
 });
 
@@ -399,7 +442,7 @@ function show(v, keepForm) {
   $('#nav').classList.remove('hidden');
   document.querySelectorAll('main>section').forEach(s => s.classList.toggle('hidden', s.id !== 'v-' + v));
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
-  ls.set('view', v);
+  ls.set('view', v); curView = v;
   views[v]().catch(err => { toast('โหลดไม่สำเร็จ: ' + err.message); if (!store.signedIn) showSignin(); });
 }
 function showSignin() {
@@ -425,4 +468,7 @@ $('#pinBtn').onclick = async () => {
 window.addEventListener('pinchange', renderPin);
 renderPin();
 show(ls.get('view') || 'today');
-setInterval(() => { if (!$('#v-today').classList.contains('hidden') && store.signedIn) loadToday().catch(() => {}); }, 60000);
+// อัปเดตอัตโนมัติทุก 2 นาที (เฉพาะตอนเปิดหน้าอยู่) และทันทีเมื่อกลับมาที่หน้านี้
+setInterval(() => { if (document.visibilityState === 'visible' && !inflight) fetchData().then(rerender).catch(() => {}); }, 120000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && Date.now() - loadedAt > STALE_MS && !inflight) fetchData().then(rerender).catch(() => {}); });
+$('#sync').onclick = () => { if (!inflight) fetchData('fresh').then(rerender).catch(e => toast(e.message)); };

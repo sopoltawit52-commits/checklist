@@ -99,6 +99,10 @@
     async update(tab, keyField, key, patch) { const d = this.mem || this._load(); const r = d[tab].find(x => String(x[keyField]) === String(key)); Object.assign(r, patch); this._save(d); return r; }
   }
 
+  // รวมหลายคำสั่งเขียน (สำหรับ store ที่ไม่มี batch ในตัว)
+  async function seqBatch(store, ops) { let last; for (const o of ops) last = o.action === 'append' ? await store.append(o.tab, o.obj) : await store.update(o.tab, o.keyField, o.key, o.patch); return last; }
+  SheetsBrowser.prototype.batch = function (ops) { return seqBatch(this, ops); };
+  DemoStore.prototype.batch = function (ops) { return seqBatch(this, ops); };
 
   // อ่านผ่าน Apps Script (ไม่ต้องล็อกอิน) — เขียนต้องใช้ PIN
   class AppsScriptStore {
@@ -109,17 +113,30 @@
     async signIn() {}
     async init() {}
     _savePin(p) { this.pin = p; try { p ? localStorage.setItem('pin', p) : localStorage.removeItem('pin'); } catch {} }
-    async _call(body) {
-      const res = await fetch(this.url, { method: 'POST', body: JSON.stringify(body) });
-      if (!res.ok) throw new Error('เชื่อมต่อไม่สำเร็จ (' + res.status + ')');
-      return res.json();
+    // เรียก Google แบบมี timeout + ลองใหม่อัตโนมัติ (คำสั่งเขียนมี id กันซ้ำฝั่งเซิร์ฟเวอร์ จึงส่งซ้ำได้ปลอดภัย)
+    async _fetchJson(url, opts, tries = 3) {
+      let lastErr;
+      for (let i = 0; i < tries; i++) {
+        const ac = new AbortController(); const tm = setTimeout(() => ac.abort(), 35000);
+        try {
+          const res = await fetch(url, { ...opts, signal: ac.signal });
+          const txt = await res.text();
+          let j; try { j = JSON.parse(txt); } catch { throw new Error('Google ตอบกลับผิดรูปแบบ (' + res.status + ')'); }
+          if (j && j.code === 503) throw new Error(j.error);
+          return j;
+        } catch (e) {
+          lastErr = e.name === 'AbortError' ? new Error('Google ตอบช้าเกินไป') : e;
+          if (i < tries - 1) await new Promise(r => setTimeout(r, 800 * (i + 1)));
+        } finally { clearTimeout(tm); }
+      }
+      throw new Error('เชื่อมต่อไม่สำเร็จ: ' + (lastErr && lastErr.message) + ' — ลองใหม่อีกครั้ง');
     }
-    async loadAll() {
-      const res = await fetch(this.url + '?action=load&t=' + Date.now());
-      const j = await res.json();
+    _call(body) { return this._fetchJson(this.url, { method: 'POST', body: JSON.stringify(body) }); }
+    _fix(d) { for (const t of ['Tasks', 'Logs', 'Snapshots', 'People', 'Categories']) d[t] = d[t] || []; return d; }
+    async loadAll(fresh) {
+      const j = await this._fetchJson(this.url + '?action=load' + (fresh ? '&fresh=1' : '') + '&t=' + Date.now(), {});
       if (!j.ok) throw new Error(j.error || 'โหลดข้อมูลไม่สำเร็จ');
-      const d = j.data; for (const t of ['Tasks', 'Logs', 'Snapshots', 'People', 'Categories']) d[t] = d[t] || [];
-      return d;
+      return this._fix(j.data);
     }
     async askPin(force) {
       if (this.pin && !force) return true;
@@ -135,10 +152,12 @@
       let j = await this._call({ ...body, pin: this.pin });
       if (!j.ok && j.code === 401) { this._savePin(''); if (!(await this.askPin(true))) throw new Error('PIN ไม่ถูกต้อง'); j = await this._call({ ...body, pin: this.pin }); }
       if (!j.ok) throw new Error(j.error || 'บันทึกไม่สำเร็จ');
+      this.lastData = j.data ? this._fix(j.data) : null; // เซิร์ฟเวอร์ v2 ส่งข้อมูลล่าสุดกลับมาด้วย
       return j;
     }
-    async append(tab, obj) { await this._write({ action: 'append', tab, obj }); }
-    async update(tab, keyField, key, patch) { return (await this._write({ action: 'update', tab, keyField, key, patch })).row; }
+    async batch(ops) { return (await this._write({ action: 'batch', ops })).row; }
+    async append(tab, obj) { await this.batch([{ action: 'append', tab, obj }]); }
+    async update(tab, keyField, key, patch) { return this.batch([{ action: 'update', tab, keyField, key, patch }]); }
   }
 
   window.createBrowserStore = cfg => (cfg.APPS_SCRIPT_URL ? new AppsScriptStore(cfg.APPS_SCRIPT_URL) : cfg.CLIENT_ID && cfg.SHEET_ID ? new SheetsBrowser(cfg.SHEET_ID, cfg.CLIENT_ID) : new DemoStore());
