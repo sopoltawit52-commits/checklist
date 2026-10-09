@@ -2,9 +2,9 @@ name: LINE แจ้งเตือนงาน
 
 on:
   schedule:
-    # GitHub ใช้เวลา UTC (เวลาไทย = UTC+7) — รันทุก 15 นาที ช่วง 05:00–19:59 น. เวลาไทย
-    - cron: '*/15 22-23 * * *'   # 05:00–06:59 น.
-    - cron: '*/15 0-12 * * *'    # 07:00–19:59 น.
+    # การแจ้งเตือน LINE ย้ายไป Supabase (pg_cron + Edge Function "notify") ตั้งแต่ 9 ต.ค. 2569 เพราะตัวตั้งเวลา GitHub ไม่ตรงเวลา
+    # ที่นี่เหลือแค่สำรองข้อมูลลง Google Sheet วันละครั้ง ~20:20 น. (เวลาไทย = UTC+7)
+    - cron: '20 13 * * *'
   workflow_dispatch:              # กดรันเองได้จากแท็บ Actions
     inputs:
       mode:
@@ -32,7 +32,7 @@ jobs:
           node-version: 20
       - run: npm install --omit=dev --no-audit --no-fund
       - name: ตรวจและส่งแจ้งเตือน
-        run: node scripts/notify.js ${{ github.event.inputs.mode || 'auto' }}
+        run: node scripts/notify.js ${{ github.event.inputs.mode || 'backup' }}
         env:
           SUPABASE_URL: https://kcvpansogqxknmirlvqu.supabase.co
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
