@@ -483,6 +483,16 @@ $('#pinBtn').onclick = async () => {
 window.addEventListener('pinchange', renderPin);
 renderPin();
 show(ls.get('view') || 'today');
+// ปุ่มบังคับส่งเข้า LINE (มีเฉพาะเมื่อใช้ Supabase)
+document.querySelectorAll('.lineRow').forEach(el => el.classList.toggle('hidden', !store.sendLine));
+document.addEventListener('click', async e => {
+  const b = e.target.closest('.sendLine'); if (!b) return;
+  if (!confirm('ส่งสรุปงานวันนี้เข้า LINE ตอนนี้เลยไหม?')) return;
+  const label = b.textContent; b.disabled = true; b.textContent = '⏳ กำลังส่ง…';
+  try { await store.sendLine(ME); toast('✔ ส่งเข้า LINE แล้ว'); }
+  catch (err) { toast('ส่งไม่สำเร็จ: ' + err.message); }
+  b.disabled = false; b.textContent = label;
+});
 // เรียลไทม์: มีคนแก้ข้อมูลที่เครื่องอื่น → โหลดใหม่ทันที (รวบหลายเหตุการณ์เป็นครั้งเดียว)
 let rtTimer = null;
 if (store.subscribe) store.subscribe(() => { clearTimeout(rtTimer); rtTimer = setTimeout(() => fetchData(true).then(rerender).catch(() => {}), 400); });

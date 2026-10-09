@@ -224,6 +224,15 @@
     }
     async append(tab, obj) { await this.batch([{ action: 'append', tab, obj }]); }
     async update(tab, keyField, key, patch) { await this.batch([{ action: 'update', tab, keyField, key, patch }]); }
+    // ปุ่มบังคับส่งสรุปเข้า LINE ทันที (ตรวจ PIN ที่เซิร์ฟเวอร์)
+    async sendLine(by) {
+      if (!(await this.askPin())) throw new Error('ต้องใส่ PIN ก่อน');
+      const call = async () => (await this._fetch('/functions/v1/notify?mode=send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: this.pin, by }) }, 1)).json();
+      let j = await call();
+      if (!j.ok && j.code === 401) { this._savePin(''); window.dispatchEvent(new Event('pinchange')); if (!(await this.askPin(true))) throw new Error('PIN ไม่ถูกต้อง'); j = await call(); }
+      if (!j.ok) throw new Error(j.error || 'ส่งไม่สำเร็จ');
+      return j;
+    }
     // แจ้งเมื่อมีคนแก้ข้อมูล (เรียลไทม์) — ใช้ supabase-js เฉพาะส่วนนี้
     subscribe(onChange) {
       if (!window.supabase || !window.supabase.createClient) return false;
