@@ -150,6 +150,15 @@ details.card>summary{cursor:pointer;color:var(--muted);font-size:14px}
 .stats.s4{grid-template-columns:repeat(4,1fr)}
 @media (max-width:520px){.stats.s4{grid-template-columns:repeat(2,1fr)}}
 nav button{font-size:11px}
+dialog#ppDlg{border:0;border-radius:16px;padding:18px;width:min(460px,calc(100vw - 32px));background:var(--card);color:var(--ink);box-shadow:0 10px 40px rgba(0,0,0,.25)}
+dialog#ppDlg::backdrop{background:rgba(0,0,0,.4)}
+.pp-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.pp-from{padding:9px 0;font-weight:600}
+.pp-hist{margin-top:10px;font-size:13px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px}
+.pp-hist div{margin:3px 0}
+.ppbtn{flex:none;font:inherit;font-size:12px;border:1px solid var(--line);background:var(--card);color:var(--muted);border-radius:8px;padding:3px 8px;cursor:pointer;margin-left:auto;white-space:nowrap}
+.ppbtn:hover{color:var(--warn);border-color:var(--warn)}
+.tag.pp{background:var(--warn-soft);color:var(--warn)}
 .sync{font-size:12px;color:var(--muted);white-space:nowrap;cursor:pointer}
 .sync.err{color:var(--bad)}
 @media (max-width:420px){header h1{font-size:16px}.sync{font-size:11px}}
@@ -311,7 +320,7 @@ nav button{font-size:11px}
     </div>
     <div class="card">
       <h2>💬 ตัวอย่างข้อความ LINE ตอนเช้า</h2>
-      <div style="font-size:14px;color:var(--muted)">GitHub Actions ส่งเข้ากลุ่มอัตโนมัติทุกเช้าวันทำงาน และเด้งเตือนตามเวลานัดหมาย</div>
+      <div style="font-size:14px;color:var(--muted)">ระบบส่งอัตโนมัติทุกเช้าวันทำงาน 06:00 น. และเด้งเตือนตามเวลานัดหมาย (ตรวจทุก 5 นาที)</div>
       <pre class="preview" id="preview"></pre>
       <div class="row2 lineRow hidden"><button class="btn sendLine" type="button">📤 ส่งข้อความนี้เข้า LINE ตอนนี้</button></div>
     </div>
@@ -358,11 +367,30 @@ nav button{font-size:11px}
 </nav>
 <div class="toast" id="toast"></div>
 
-<script src="config.js?v=8"></script>
-<script src="logic.js?v=8"></script>
-<script src="demo-data.js?v=8"></script>
-<script src="store-browser.js?v=8"></script>
+<!-- ===== เลื่อนวัน ===== -->
+<dialog id="ppDlg">
+  <form id="ppForm" autocomplete="off">
+    <h3 style="margin:0 0 4px">⏭️ เลื่อนวัน</h3>
+    <div id="ppTitle" style="font-weight:600;margin-bottom:10px"></div>
+    <div class="pp-grid">
+      <div><label>กำหนดเดิม</label><div id="ppFrom" class="pp-from"></div></div>
+      <div><label>เลื่อนไปวันที่ *</label><input type="date" name="to" required></div>
+    </div>
+    <div class="chips" id="ppQuick" style="margin-top:8px"><button type="button" class="chip" data-add="1">+1 วัน</button><button type="button" class="chip" data-add="2">+2 วัน</button><button type="button" class="chip" data-add="3">+3 วัน</button><button type="button" class="chip" data-add="7">+1 สัปดาห์</button></div>
+    <label id="ppShiftWrap" class="hidden" style="display:flex;gap:6px;align-items:center;color:var(--ink)"><input type="checkbox" name="shift" style="width:auto"> เลื่อนวันเริ่มงานไปด้วยเท่ากัน</label>
+    <label style="margin-top:10px">เหตุผลการเลื่อน *</label>
+    <div class="chips" id="ppReasons"><button type="button" class="chip">รออะไหล่/วัสดุ</button><button type="button" class="chip">รอผู้รับเหมา/ช่างนอก</button><button type="button" class="chip">ติดงานด่วนอื่น</button><button type="button" class="chip">เครื่องจักรยังหยุดไม่ได้</button><button type="button" class="chip">รออนุมัติ</button><button type="button" class="chip">สภาพอากาศ</button><button type="button" class="chip">คนไม่พอ</button></div>
+    <textarea name="reason" rows="2" required maxlength="200" placeholder="พิมพ์เหตุผล หรือกดเลือกด้านบน"></textarea>
+    <div id="ppHist"></div>
+    <div class="row2" style="justify-content:flex-end"><button type="button" class="btn ghost" id="ppCancel">ยกเลิก</button><button type="submit" class="btn" id="ppSave">บันทึกการเลื่อน</button></div>
+  </form>
+</dialog>
+
+<script src="config.js?v=9"></script>
+<script src="logic.js?v=9"></script>
+<script src="demo-data.js?v=9"></script>
+<script src="store-browser.js?v=9"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
-<script src="app.js?v=8"></script>
+<script src="app.js?v=9"></script>
 </body>
 </html>

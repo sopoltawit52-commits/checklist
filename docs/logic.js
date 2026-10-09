@@ -7,7 +7,7 @@
   let WORK_DAYS = new Set([1, 2, 3, 4, 5, 6]);
 
   const SCHEMA = {
-    Tasks: ['id', 'title', 'owner', 'category', 'priority', 'type', 'due_date', 'time', 'remind_before', 'status', 'created_at', 'created_by', 'done_at', 'reminded', 'note', 'start_date'],
+    Tasks: ['id', 'title', 'owner', 'category', 'priority', 'type', 'due_date', 'time', 'remind_before', 'status', 'created_at', 'created_by', 'done_at', 'reminded', 'note', 'start_date', 'postpone_log'],
     Logs: ['log_id', 'date', 'time', 'task_id', 'title', 'owner', 'done_by', 'type', 'note', 'void'],
     Snapshots: ['date', 'planned', 'done', 'pct', 'by_owner_json'],
     Meta: ['key', 'value'],
@@ -48,6 +48,8 @@
   const PRIO_RANK = { 'สูง': 0, 'กลาง': 1, 'ต่ำ': 2 };
   // ผู้รับผิดชอบหลายคน เก็บเป็น "ชื่อ1, ชื่อ2"
   const owners = t => String((t && t.owner) || '').split(/\s*,\s*/).map(x => x.trim()).filter(Boolean);
+  // ประวัติการเลื่อนวัน เก็บใน tasks.postpone_log เป็น JSON [{at, by, from, to, reason}]
+  function postpones(t) { try { const a = JSON.parse((t && t.postpone_log) || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } }
   const TYPE_LABEL = { daily: 'ประจำวัน', once: 'ครั้งเดียว', backlog: 'รายการค้าง', plan: 'งานตามแผน' };
   const dayDiff = (a, b) => Math.round((new Date(b + 'T00:00:00Z') - new Date(a + 'T00:00:00Z')) / 86400000);
 
@@ -189,7 +191,14 @@
   // ---------------------------------------------------------------- ข้อความ LINE
   const shortDate = d => new Date(d + 'T00:00:00+07:00').toLocaleDateString('th-TH', { timeZone: TZ, day: 'numeric', month: 'short' });
   const longDate = d => new Date(d + 'T00:00:00+07:00').toLocaleDateString('th-TH', { timeZone: TZ, weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
-  const who = t => (t.owner ? ` — ${t.owner}` : '');
+  // ผู้รับผิดชอบขึ้นบรรทัดใหม่ + หมายเหตุการเลื่อนวัน (ถ้ามี)
+  const IND = '      ';
+  const who = t => {
+    let s = t.owner ? `\n${IND}👤 ${owners(t).join(', ')}` : '';
+    const pp = postpones(t);
+    if (pp.length) { const l = pp[pp.length - 1]; s += `\n${IND}↪️ เลื่อน${pp.length > 1 ? ` (ครั้งที่ ${pp.length})` : ''}${l.reason ? ': ' + l.reason : ''}`; }
+    return s;
+  };
   const daysLate = (due, date) => Math.round((new Date(date) - new Date(due)) / 86400000);
 
   function morningMessage(tasks, logs, appUrl, opt = {}) {
@@ -221,7 +230,7 @@
     const late = day.plans.filter(p => p.state === 'over');
     if (late.length && opt.includePlan !== false) {
       L.push('', `🔴 งานเกินระยะเวลา (${late.length})`);
-      late.slice(0, 30).forEach(t => L.push(`▫️ ${t.title}${who(t)}\n     (${shortDate(t.start)}–${shortDate(t.end)} · เกิน ${t.daysLate} วัน)`));
+      late.slice(0, 30).forEach(t => L.push(`▫️ ${t.title}\n${IND}📆 ${shortDate(t.start)}–${shortDate(t.end)} · เกิน ${t.daysLate} วัน${who(t)}`));
       if (late.length > 30) L.push(`…และอีก ${late.length - 30} รายการ`);
     }
 
@@ -252,5 +261,5 @@
     return L.join('\n');
   }
 
-  return { owners, TYPE_LABEL, PLAN_LABEL, planInfo, buildSchedule, dayDiff, SCHEMA, TZ, nowParts, today, addDays, normDate, normTime, toMin, fromMin, setWorkDays, isWorkDay, newId, buildDay, buildHistory, dueReminders, morningMessage, reminderMessage };
+  return { owners, postpones, TYPE_LABEL, PLAN_LABEL, planInfo, buildSchedule, dayDiff, SCHEMA, TZ, nowParts, today, addDays, normDate, normTime, toMin, fromMin, setWorkDays, isWorkDay, newId, buildDay, buildHistory, dueReminders, morningMessage, reminderMessage };
 });

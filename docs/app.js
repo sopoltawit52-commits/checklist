@@ -105,10 +105,13 @@ function taskRow(t, mode) {
   if (t.priority === 'สูง') tags.push('<span class="tag high">สำคัญสูง</span>');
   if (t.owner) tags.push(`<span>👤 ${esc(L.owners(t).join(', '))}</span>`);
   if (t.category) tags.push(`<span>${catDot(t.category)}${esc(t.category)}</span>`);
+  const pp = L.postpones(t);
+  if (pp.length) tags.push(`<span class="tag pp" title="${esc(pp.map(x => `${x.from} → ${x.to}: ${x.reason}`).join('\n'))}">↪️ เลื่อน ${pp.length} ครั้ง${pp[pp.length - 1].reason ? ': ' + esc(pp[pp.length - 1].reason) : ''}</span>`);
   if (mode === 'done') tags.push(`<span class="tag ok">✓ ${esc(t.done_time || '')}${t.done_by ? ' โดย ' + esc(t.done_by) : ''}</span>`);
   const cb = mode === 'up' ? '' : `<button class="cb" aria-label="${mode === 'done' ? 'ยกเลิกเสร็จ' : 'ทำเสร็จ'}" data-id="${t.id}" data-act="${mode === 'done' ? 'undo' : 'done'}"></button>`;
   const prog = t.type === 'plan' && mode !== 'done' && t.state ? `<div class="prog st-${t.state}" title="ใช้เวลาไปแล้ว ${t.timePct}% ของระยะเวลา"><i style="width:${t.timePct}%"></i></div>` : '';
-  return `<div class="task ${mode === 'done' ? 'done' : ''}">${cb}<div class="body"><div class="title">${esc(t.title)}</div><div class="meta">${tags.join('')}</div>${prog}${t.note ? `<div class="meta">📝 ${esc(t.note)}</div>` : ''}</div></div>`;
+  const ppb = mode !== 'done' && (t.type === 'once' || t.type === 'plan') ? `<button class="ppbtn" data-pp="${t.id}" title="เลื่อนวัน">⏭️ เลื่อน</button>` : '';
+  return `<div class="task ${mode === 'done' ? 'done' : ''}">${cb}<div class="body"><div class="title">${esc(t.title)}</div><div class="meta">${tags.join('')}</div>${prog}${t.note ? `<div class="meta">📝 ${esc(t.note)}</div>` : ''}</div>${ppb}</div>`;
 }
 
 // ---------------------------------------------------------------- วันนี้
@@ -201,7 +204,7 @@ async function loadSchedule() {
     const bar = r > l ? `<i class="g-bar ${a < 0 ? 'cut-l' : ''} ${b > 100 ? 'cut-r' : ''}" style="left:${l}%;width:${r - l}%"></i>` : '';
     const out = b <= 0 && !late ? '<span class="muted" style="position:absolute;left:4px;top:0">◀ ก่อนช่วงที่แสดง</span>' : a >= 100 ? '<span class="muted" style="position:absolute;right:4px;top:0">ถัดไป ▶</span>' : '';
     const cb = ['ontime', 'late'].includes(t.state) ? '' : `<button class="cb" style="width:22px;height:22px" aria-label="ทำเสร็จ" data-id="${t.id}" data-act="done" data-from="schedule"></button>`;
-    return `<div class="g-row st-${t.state}"><div class="g-head">${cb}<div class="title">${esc(t.title)}</div><button class="btn ghost sm" data-edit="${t.id}">แก้ไข</button></div>
+    return `<div class="g-row st-${t.state}"><div class="g-head">${cb}<div class="title">${esc(t.title)}</div>${['ontime', 'late'].includes(t.state) ? '' : `<button class="ppbtn" data-pp="${t.id}">⏭️ เลื่อน</button>`}<button class="btn ghost sm" data-edit="${t.id}">แก้ไข</button></div>
       <div class="meta"><span class="tag st">${t.state === 'over' ? `⚠ เกินระยะเวลา ${t.daysLate} วัน` : t.state === 'late' ? `เสร็จช้า ${t.daysLate} วัน` : t.state === 'doing' ? (t.daysLeft === 0 ? 'ครบกำหนดวันนี้' : `กำลังดำเนินการ · เหลือ ${t.daysLeft} วัน`) : t.state === 'wait' ? `เริ่มอีก ${L.dayDiff(td, t.start)} วัน` : 'เสร็จตามเวลา'}</span>
       <span>📆 ${fmtDue(t.start)} – ${fmtDue(t.end)} (${t.totalDays} วัน)</span>${t.doneDate ? `<span>✓ เสร็จ ${fmtDue(t.doneDate)}</span>` : ''}${t.owner ? `<span>👤 ${esc(L.owners(t).join(', '))}</span>` : ''}${t.category ? `<span>${catDot(t.category)}${esc(t.category)}</span>` : ''}</div>
       <div class="g-track">${grid}${bar}${late}${out}${todayX >= 0 && todayX <= 100 ? `<i class="g-today" style="left:${todayX}%"></i>` : ''}</div></div>`;
@@ -483,6 +486,48 @@ $('#pinBtn').onclick = async () => {
 window.addEventListener('pinchange', renderPin);
 renderPin();
 show(ls.get('view') || 'today');
+// ---------------------------------------------------------------- เลื่อนวัน + เหตุผล
+let ppTask = null;
+function openPostpone(id) {
+  const t = (DATA.Tasks || []).find(x => x.id === id); if (!t) return;
+  ppTask = t;
+  const f = $('#ppForm'); f.reset();
+  const cur = L.normDate(t.due_date) || L.today();
+  $('#ppTitle').textContent = t.title;
+  $('#ppFrom').textContent = (t.type === 'plan' ? `${fmtDue(L.normDate(t.start_date) || L.normDate(t.created_at))} – ` : '') + fmtDue(cur) + (t.time ? ' ' + L.normTime(t.time) + ' น.' : '');
+  const base = cur < L.today() ? L.today() : cur;
+  f.elements['to'].value = L.addDays(base, 1); f.elements['to'].min = L.today();
+  $('#ppShiftWrap').classList.toggle('hidden', t.type !== 'plan');
+  const hist = L.postpones(t);
+  $('#ppHist').innerHTML = hist.length ? `<div class="pp-hist"><b>ประวัติการเลื่อน (${hist.length})</b>${hist.map(h => `<div>• ${fmtDue(h.from)} → ${fmtDue(h.to)} — ${esc(h.reason)}${h.by ? ` <span class="muted">(${esc(h.by)})</span>` : ''}</div>`).join('')}</div>` : '';
+  $('#ppDlg').showModal();
+}
+$('#ppQuick').addEventListener('click', e => { const b = e.target.closest('[data-add]'); if (!b || !ppTask) return; const cur = L.normDate(ppTask.due_date) || L.today(); const base = cur < L.today() ? L.today() : cur; $('#ppForm').elements['to'].value = L.addDays(base, +b.dataset.add); });
+$('#ppReasons').addEventListener('click', e => { const b = e.target.closest('.chip'); if (!b) return; const ta = $('#ppForm').elements['reason']; ta.value = ta.value.trim() ? ta.value.trim() + ', ' + b.textContent : b.textContent; ta.focus(); });
+$('#ppCancel').onclick = () => $('#ppDlg').close();
+$('#ppForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const f = e.target, t = ppTask; if (!t) return;
+  const to = f.elements['to'].value, reason = f.elements['reason'].value.trim();
+  if (!to || !reason) return toast('กรุณาใส่วันที่และเหตุผล');
+  const from = L.normDate(t.due_date);
+  if (to === from) return toast('วันที่ใหม่ต้องไม่ใช่วันเดิม');
+  if (!ME) askName();
+  const n = L.nowParts();
+  const log = [...L.postpones(t), { at: `${n.date} ${n.time.slice(0, 5)}`, by: ME, from, to, reason }];
+  const patch = { due_date: to, reminded: '', postpone_log: JSON.stringify(log) };
+  if (t.type === 'plan') {
+    const st = L.normDate(t.start_date) || L.normDate(t.created_at);
+    if (f.elements['shift'].checked && from) patch.start_date = L.addDays(st, L.dayDiff(from, to));
+    else if (st && to < st) patch.start_date = to;
+  }
+  const btn = $('#ppSave'); btn.disabled = true;
+  try { await write([{ action: 'update', tab: 'Tasks', keyField: 'id', key: t.id, patch }]); $('#ppDlg').close(); toast(`✔ เลื่อนไป ${fmtDue(to)} แล้ว`); rerender(); }
+  catch (err) { toast('ผิดพลาด: ' + err.message); }
+  btn.disabled = false;
+});
+document.addEventListener('click', e => { const b = e.target.closest('[data-pp]'); if (b) { e.preventDefault(); openPostpone(b.dataset.pp); } });
+
 // ปุ่มบังคับส่งเข้า LINE (มีเฉพาะเมื่อใช้ Supabase)
 document.querySelectorAll('.lineRow').forEach(el => el.classList.toggle('hidden', !store.sendLine));
 document.addEventListener('click', async e => {
