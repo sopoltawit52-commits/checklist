@@ -56,14 +56,29 @@ async function refresh(force) {
   return fetchData(force === 'fresh');
 }
 // เขียนหลายคำสั่งในครั้งเดียว แล้วใช้ข้อมูลล่าสุดที่เซิร์ฟเวอร์ส่งกลับ (ไม่ต้องโหลดซ้ำ)
+// แสดงผลทันที (แก้ข้อมูลในเครื่องก่อน) แล้วค่อยบันทึกจริง — ถ้าบันทึกไม่สำเร็จจะโหลดข้อมูลจริงกลับมา
+function applyLocal(ops) {
+  if (!DATA) return;
+  const D = { ...DATA };
+  for (const o of ops) {
+    const rows = D[o.tab] = [...(D[o.tab] || [])];
+    if (o.action === 'append') { const k = Object.keys(o.obj)[0]; if (!rows.some(r => r[k] === o.obj[k])) rows.push({ ...o.obj }); }
+    else { const i = rows.findIndex(r => String(r[o.keyField]) === String(o.key)); if (i >= 0) rows[i] = { ...rows[i], ...o.patch }; }
+  }
+  DATA = D; loadedAt = Date.now();
+}
 async function write(ops) {
-  inflight || setSyncBusy(true);
+  if (store.canEdit === false && !(await store.askPin())) throw new Error('ต้องใส่ PIN ก่อนแก้ไข');
+  const before = DATA;
+  applyLocal(ops); rerender();
+  setSyncBusy(true);
   try {
     store.lastData = null;
     const row = await store.batch(ops);
-    if (store.lastData) setData(store.lastData); else await fetchData(true);
+    if (store.lastData) setData(store.lastData); else await fetchData(true).catch(() => {});
     return row;
-  } finally { setSyncBusy(false); }
+  } catch (e) { DATA = before; fetchData(true).then(rerender).catch(() => {}); rerender(); throw e; }
+  finally { setSyncBusy(false); }
 }
 function setSyncBusy(b) { const el = $('#sync'); if (!el) return; if (b) { el.textContent = '⟳ กำลังบันทึก…'; el.className = 'sync'; } else setSync(); }
 
@@ -468,6 +483,9 @@ $('#pinBtn').onclick = async () => {
 window.addEventListener('pinchange', renderPin);
 renderPin();
 show(ls.get('view') || 'today');
+// เรียลไทม์: มีคนแก้ข้อมูลที่เครื่องอื่น → โหลดใหม่ทันที (รวบหลายเหตุการณ์เป็นครั้งเดียว)
+let rtTimer = null;
+if (store.subscribe) store.subscribe(() => { clearTimeout(rtTimer); rtTimer = setTimeout(() => fetchData(true).then(rerender).catch(() => {}), 400); });
 // อัปเดตอัตโนมัติทุก 2 นาที (เฉพาะตอนเปิดหน้าอยู่) และทันทีเมื่อกลับมาที่หน้านี้
 setInterval(() => { if (document.visibilityState === 'visible' && !inflight) fetchData().then(rerender).catch(() => {}); }, 120000);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && Date.now() - loadedAt > STALE_MS && !inflight) fetchData().then(rerender).catch(() => {}); });

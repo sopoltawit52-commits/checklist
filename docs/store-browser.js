@@ -160,5 +160,82 @@
     async update(tab, keyField, key, patch) { return this.batch([{ action: 'update', tab, keyField, key, patch }]); }
   }
 
-  window.createBrowserStore = cfg => (cfg.APPS_SCRIPT_URL ? new AppsScriptStore(cfg.APPS_SCRIPT_URL) : cfg.CLIENT_ID && cfg.SHEET_ID ? new SheetsBrowser(cfg.SHEET_ID, cfg.CLIENT_ID) : new DemoStore());
+  // ---------------------------------------------------------------- Supabase (ฐานข้อมูลหลัก — เร็ว + เรียลไทม์)
+  const TAB2T = { Tasks: 'tasks', Logs: 'logs', Snapshots: 'snapshots', People: 'people', Categories: 'categories' };
+  class SupabaseStore {
+    constructor(url, key) {
+      this.url = url.replace(/\/+$/, ''); this.key = key;
+      this.pin = (() => { try { return localStorage.getItem('pin') || ''; } catch { return ''; } })();
+      this.h = { apikey: key, ...(key.startsWith('eyJ') ? { Authorization: 'Bearer ' + key } : {}) };
+    }
+    get demo() { return false; }
+    get signedIn() { return true; }
+    get canEdit() { return !!this.pin; }
+    async signIn() {}
+    async init() {}
+    _savePin(p) { this.pin = p; try { p ? localStorage.setItem('pin', p) : localStorage.removeItem('pin'); } catch {} }
+    async _fetch(path, opts = {}, tries = 3) {
+      let last;
+      for (let i = 0; i < tries; i++) {
+        const ac = new AbortController(); const tm = setTimeout(() => ac.abort(), 15000);
+        try {
+          const res = await fetch(this.url + path, { ...opts, headers: { ...this.h, ...(opts.headers || {}) }, signal: ac.signal });
+          if (!res.ok) { const t = await res.text(); const e = new Error('ฐานข้อมูลตอบ ' + res.status + ': ' + t.slice(0, 160)); e.status = res.status; throw e; }
+          return res;
+        } catch (e) {
+          last = e.name === 'AbortError' ? new Error('ฐานข้อมูลตอบช้าเกินไป') : e;
+          if (e.status && e.status < 500) break;
+          if (i < tries - 1) await new Promise(r => setTimeout(r, 600 * (i + 1)));
+        } finally { clearTimeout(tm); }
+      }
+      throw new Error('เชื่อมต่อไม่สำเร็จ: ' + (last && last.message));
+    }
+    async _all(table, filter = '') {
+      const out = []; const size = 1000;
+      for (let from = 0; ; from += size) {
+        const res = await this._fetch(`/rest/v1/${table}?select=*${filter}`, { headers: { Range: `${from}-${from + size - 1}`, 'Range-Unit': 'items' } });
+        const rows = await res.json(); out.push(...rows);
+        if (rows.length < size) break;
+      }
+      return out.map(r => { const o = {}; for (const k in r) o[k] = r[k] == null ? '' : String(r[k]); return o; });
+    }
+    async loadAll() {
+      const cutoff = L.addDays(L.today(), -120);
+      const entries = await Promise.all(Object.entries(TAB2T).map(async ([tab, t]) => [tab, await this._all(t, t === 'logs' ? `&date=gte.${cutoff}` : '')]));
+      return Object.fromEntries(entries);
+    }
+    async _rpc(fn, body) { return (await this._fetch('/rest/v1/rpc/' + fn, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json(); }
+    async askPin(force) {
+      if (this.pin && !force) return true;
+      const p = prompt('ใส่รหัส PIN เพื่อแก้ไขข้อมูล');
+      if (!p) return false;
+      const j = await this._rpc('check_pin', { p_pin: p.trim() });
+      if (!j.ok) { alert(j.error || 'PIN ไม่ถูกต้อง'); return false; }
+      this._savePin(p.trim()); window.dispatchEvent(new Event('pinchange')); return true;
+    }
+    logout() { this._savePin(''); window.dispatchEvent(new Event('pinchange')); }
+    async batch(ops) {
+      if (!(await this.askPin())) throw new Error('ต้องใส่ PIN ก่อนแก้ไข');
+      const send = () => this._rpc('write_batch', { p_pin: this.pin, p_ops: ops.map(o => ({ ...o, tab: TAB2T[o.tab] || o.tab })) });
+      let j = await send();
+      if (!j.ok && j.code === 401) { this._savePin(''); window.dispatchEvent(new Event('pinchange')); if (!(await this.askPin(true))) throw new Error('PIN ไม่ถูกต้อง'); j = await send(); }
+      if (!j.ok) throw new Error(j.error || 'บันทึกไม่สำเร็จ');
+      return j;
+    }
+    async append(tab, obj) { await this.batch([{ action: 'append', tab, obj }]); }
+    async update(tab, keyField, key, patch) { await this.batch([{ action: 'update', tab, keyField, key, patch }]); }
+    // แจ้งเมื่อมีคนแก้ข้อมูล (เรียลไทม์) — ใช้ supabase-js เฉพาะส่วนนี้
+    subscribe(onChange) {
+      if (!window.supabase || !window.supabase.createClient) return false;
+      try {
+        const sb = window.supabase.createClient(this.url, this.key, { auth: { persistSession: false } });
+        const ch = sb.channel('checklist-db');
+        for (const t of Object.values(TAB2T)) ch.on('postgres_changes', { event: '*', schema: 'public', table: t }, () => onChange(t));
+        ch.subscribe(st => { this.rtStatus = st; window.dispatchEvent(new Event('rtstatus')); });
+        this.channel = ch; return true;
+      } catch (e) { console.warn('realtime', e); return false; }
+    }
+  }
+
+  window.createBrowserStore = cfg => (cfg.SUPABASE_URL && cfg.SUPABASE_KEY ? new SupabaseStore(cfg.SUPABASE_URL, cfg.SUPABASE_KEY) : cfg.APPS_SCRIPT_URL ? new AppsScriptStore(cfg.APPS_SCRIPT_URL) : cfg.CLIENT_ID && cfg.SHEET_ID ? new SheetsBrowser(cfg.SHEET_ID, cfg.CLIENT_ID) : new DemoStore());
 })();
