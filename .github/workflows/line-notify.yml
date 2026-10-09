@@ -8,10 +8,10 @@ on:
   workflow_dispatch:              # กดรันเองได้จากแท็บ Actions
     inputs:
       mode:
-        description: 'auto = ปกติ, morning = ส่งสรุปเช้าทันที, preview = ดูข้อความไม่ส่ง'
+        description: 'auto = ปกติ, morning = ส่งสรุปเช้าทันที, preview = ดูข้อความไม่ส่ง, backup = สำรองลง Google Sheet ทันที'
         default: 'auto'
         type: choice
-        options: [auto, morning, preview]
+        options: [auto, morning, preview, backup]
 
 permissions:
   contents: read
@@ -34,6 +34,8 @@ jobs:
       - name: ตรวจและส่งแจ้งเตือน
         run: node scripts/notify.js ${{ github.event.inputs.mode || 'auto' }}
         env:
+          SUPABASE_URL: https://kcvpansogqxknmirlvqu.supabase.co
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
           GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
