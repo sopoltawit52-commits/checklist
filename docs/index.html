@@ -234,12 +234,15 @@ dialog#ppDlg::backdrop{background:rgba(0,0,0,.4)}
   <!-- ===== สเก็ตดูล ===== -->
   <section id="v-schedule" class="hidden">
     <div class="card">
-      <h2>🗓️ สเก็ตดูลงานตามแผน <span class="sub" id="gDate"></span></h2>
+      <h2>🗓️ สเก็ตดูลงาน <span class="sub" id="gDate"></span></h2>
       <div class="stats s4" style="margin-bottom:12px">
         <div class="stat st-doing"><b id="gDoing" style="color:var(--c)">0</b><span>กำลังดำเนินการ</span></div>
         <div class="stat bad"><b id="gOver">0</b><span>เกินระยะเวลา</span></div>
         <div class="stat"><b id="gWait">0</b><span>ยังไม่เริ่ม</span></div>
         <div class="stat ok"><b id="gOnTime">-</b><span>เสร็จตรงเวลา</span></div>
+      </div>
+      <div class="chips" id="gType">
+        <button class="chip on" data-t="all">ทุกประเภท</button><button class="chip" data-t="once">📅 นัดหมาย / ครั้งเดียว</button><button class="chip" data-t="plan">งานตามแผน</button>
       </div>
       <div class="chips" id="gFilter">
         <button class="chip on" data-g="active">ยังไม่เสร็จ</button><button class="chip" data-g="over">เกินระยะเวลา</button><button class="chip" data-g="done">เสร็จแล้ว</button><button class="chip" data-g="all">ทั้งหมด</button>
@@ -386,11 +389,11 @@ dialog#ppDlg::backdrop{background:rgba(0,0,0,.4)}
   </form>
 </dialog>
 
-<script src="config.js?v=9"></script>
-<script src="logic.js?v=9"></script>
-<script src="demo-data.js?v=9"></script>
-<script src="store-browser.js?v=9"></script>
+<script src="config.js?v=10"></script>
+<script src="logic.js?v=10"></script>
+<script src="demo-data.js?v=10"></script>
+<script src="store-browser.js?v=10"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
-<script src="app.js?v=9"></script>
+<script src="app.js?v=10"></script>
 </body>
 </html>

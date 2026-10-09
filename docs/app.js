@@ -7,7 +7,7 @@ const store = createBrowserStore(CFG);
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const ls = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
-let ME = ls.get('me') || '', ownerSel = 'ทั้งหมด', histDays = 14, gFilter = 'active', gRange = 31, gOwner = 'ทั้งหมด', mStatus = 'open', DATA = null, inited = false;
+let ME = ls.get('me') || '', ownerSel = 'ทั้งหมด', histDays = 14, gFilter = 'active', gType = 'all', gRange = 31, gOwner = 'ทั้งหมด', mStatus = 'open', DATA = null, inited = false;
 document.querySelectorAll('.tgt').forEach(e => (e.textContent = TARGET));
 $('#appName').textContent = CFG.APP_NAME || 'เช็คลิสต์งานทีม';
 document.title = CFG.APP_NAME || document.title;
@@ -185,7 +185,7 @@ async function loadSchedule() {
   if (!owners.includes(gOwner)) gOwner = 'ทั้งหมด';
   $('#gOwner').innerHTML = owners.length > 2 ? owners.map(o => `<button class="chip ${o === gOwner ? 'on' : ''}" data-go="${esc(o)}">${esc(o)}</button>`).join('') : '';
   const pick = { active: i => ['over', 'doing', 'wait'].includes(i.state), over: i => i.state === 'over', done: i => ['ontime', 'late'].includes(i.state), all: () => true }[gFilter];
-  const list = sc.items.filter(pick).filter(t => gOwner === 'ทั้งหมด' || (L.owners(t).length ? L.owners(t) : ['ไม่ระบุ']).includes(gOwner));
+  const list = sc.items.filter(pick).filter(t => gType === 'all' || t.type === gType).filter(t => gOwner === 'ทั้งหมด' || (L.owners(t).length ? L.owners(t) : ['ไม่ระบุ']).includes(gOwner));
   // ช่วงเวลาที่แสดง: เริ่มก่อนวันนี้เล็กน้อย
   const from = L.addDays(td, -Math.round(gRange * 0.25)), to = L.addDays(from, gRange - 1), span = gRange;
   const x = d => (L.dayDiff(from, d) / span) * 100;
@@ -205,10 +205,10 @@ async function loadSchedule() {
     const out = b <= 0 && !late ? '<span class="muted" style="position:absolute;left:4px;top:0">◀ ก่อนช่วงที่แสดง</span>' : a >= 100 ? '<span class="muted" style="position:absolute;right:4px;top:0">ถัดไป ▶</span>' : '';
     const cb = ['ontime', 'late'].includes(t.state) ? '' : `<button class="cb" style="width:22px;height:22px" aria-label="ทำเสร็จ" data-id="${t.id}" data-act="done" data-from="schedule"></button>`;
     return `<div class="g-row st-${t.state}"><div class="g-head">${cb}<div class="title">${esc(t.title)}</div>${['ontime', 'late'].includes(t.state) ? '' : `<button class="ppbtn" data-pp="${t.id}">⏭️ เลื่อน</button>`}<button class="btn ghost sm" data-edit="${t.id}">แก้ไข</button></div>
-      <div class="meta"><span class="tag st">${t.state === 'over' ? `⚠ เกินระยะเวลา ${t.daysLate} วัน` : t.state === 'late' ? `เสร็จช้า ${t.daysLate} วัน` : t.state === 'doing' ? (t.daysLeft === 0 ? 'ครบกำหนดวันนี้' : `กำลังดำเนินการ · เหลือ ${t.daysLeft} วัน`) : t.state === 'wait' ? `เริ่มอีก ${L.dayDiff(td, t.start)} วัน` : 'เสร็จตามเวลา'}</span>
-      <span>📆 ${fmtDue(t.start)} – ${fmtDue(t.end)} (${t.totalDays} วัน)</span>${t.doneDate ? `<span>✓ เสร็จ ${fmtDue(t.doneDate)}</span>` : ''}${t.owner ? `<span>👤 ${esc(L.owners(t).join(', '))}</span>` : ''}${t.category ? `<span>${catDot(t.category)}${esc(t.category)}</span>` : ''}</div>
+      <div class="meta"><span class="tag st">${t.state === 'over' ? `⚠ เกินระยะเวลา ${t.daysLate} วัน` : t.state === 'late' ? `เสร็จช้า ${t.daysLate} วัน` : t.state === 'doing' ? (t.daysLeft === 0 ? 'ครบกำหนดวันนี้' : `กำลังดำเนินการ · เหลือ ${t.daysLeft} วัน`) : t.state === 'wait' ? (t.type === 'once' ? `อีก ${L.dayDiff(td, t.start)} วัน` : `เริ่มอีก ${L.dayDiff(td, t.start)} วัน`) : 'เสร็จตามเวลา'}</span>
+      ${t.type === 'once' ? '<span class="tag">📅 นัด/ครั้งเดียว</span>' : '<span class="tag plan">งานตามแผน</span>'}<span>📆 ${t.type === 'once' ? fmtDue(t.end) + (t.time ? ' ' + esc(L.normTime(t.time)) + ' น.' : '') : `${fmtDue(t.start)} – ${fmtDue(t.end)} (${t.totalDays} วัน)`}</span>${t.doneDate ? `<span>✓ เสร็จ ${fmtDue(t.doneDate)}</span>` : ''}${t.owner ? `<span>👤 ${esc(L.owners(t).join(', '))}</span>` : ''}${t.category ? `<span>${catDot(t.category)}${esc(t.category)}</span>` : ''}</div>
       <div class="g-track">${grid}${bar}${late}${out}${todayX >= 0 && todayX <= 100 ? `<i class="g-today" style="left:${todayX}%"></i>` : ''}</div></div>`;
-  }).join('') : `<div class="empty">ไม่มีงานตามแผน${gFilter !== 'all' ? 'ในตัวกรองนี้' : ''} — เพิ่มได้ที่ "เพิ่มงาน" แล้วเลือก "งานตามแผน"</div>`;
+  }).join('') : `<div class="empty">ไม่มีงาน${gFilter !== 'all' || gType !== 'all' ? 'ในตัวกรองนี้' : 'ที่มีกำหนดวัน'} — เพิ่มได้ที่ "เพิ่มงาน" (นัดหมาย หรือ งานตามแผน)</div>`;
 }
 
 // ---------------------------------------------------------------- ประวัติ
@@ -334,6 +334,7 @@ document.addEventListener('click', async e => {
     return;
   }
   const chip = e.target.closest('#ownerFilter .chip'); if (chip) { ownerSel = chip.dataset.o; loadToday(); }
+  const gt = e.target.closest('#gType .chip'); if (gt) { gType = gt.dataset.t; document.querySelectorAll('#gType .chip').forEach(c => c.classList.toggle('on', c === gt)); loadSchedule(); }
   const gf = e.target.closest('#gFilter .chip'); if (gf) { gFilter = gf.dataset.g; document.querySelectorAll('#gFilter .chip').forEach(c => c.classList.toggle('on', c === gf)); loadSchedule(); }
   const gr = e.target.closest('#gRange .chip'); if (gr) { gRange = +gr.dataset.r; document.querySelectorAll('#gRange .chip').forEach(c => c.classList.toggle('on', c === gr)); loadSchedule(); }
   const go = e.target.closest('#gOwner .chip'); if (go) { gOwner = go.dataset.go; loadSchedule(); }

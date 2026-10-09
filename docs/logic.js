@@ -57,7 +57,7 @@
   // state: wait=ยังไม่เริ่ม doing=กำลังทำ over=เกินระยะเวลา ontime=เสร็จตามเวลา late=เสร็จช้า
   const PLAN_LABEL = { wait: 'ยังไม่เริ่ม', doing: 'กำลังดำเนินการ', over: 'เกินระยะเวลา', ontime: 'เสร็จตามเวลา', late: 'เสร็จช้ากว่ากำหนด' };
   function planInfo(raw, date = today()) {
-    const start = normDate(raw.start_date) || normDate(raw.created_at) || date;
+    const start = raw.type === 'once' ? (normDate(raw.due_date) || date) : (normDate(raw.start_date) || normDate(raw.created_at) || date);
     const end = normDate(raw.due_date) || start;
     const doneDate = raw.status === 'done' ? (normDate(raw.done_at) || date) : '';
     const total = Math.max(dayDiff(start, end) + 1, 1);
@@ -75,7 +75,7 @@
     };
   }
   function buildSchedule(tasks, date = today()) {
-    const items = tasks.filter(t => t.type === 'plan' && t.status !== 'cancel').map(t => ({ ...t, ...planInfo(t, date), due_date: normDate(t.due_date), start_date: normDate(t.start_date) }));
+    const items = tasks.filter(t => (t.type === 'plan' || (t.type === 'once' && normDate(t.due_date))) && t.status !== 'cancel').map(t => ({ ...t, ...planInfo(t, date), due_date: normDate(t.due_date), start_date: normDate(t.start_date) }));
     const ORDER = { over: 0, doing: 1, wait: 2, late: 3, ontime: 4 };
     items.sort((a, b) => ORDER[a.state] - ORDER[b.state] || a.end.localeCompare(b.end) || a.start.localeCompare(b.start));
     const c = s => items.filter(i => i.state === s).length;
