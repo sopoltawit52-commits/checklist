@@ -16,8 +16,11 @@ const DRY = !!env.DRY_RUN;
 const APP_URL = env.APP_URL || '';
 const OPTS = { includeDaily: env.INCLUDE_DAILY === 'true', includeUpcoming: env.INCLUDE_UPCOMING !== 'false' };
 
+const USE_SB = !!(env.SUPABASE_URL && env.SUPABASE_SECRET_KEY);
 const store = createStore({
-  storage: env.STORAGE || 'sheets',
+  storage: env.STORAGE || (USE_SB ? 'supabase' : 'sheets'),
+  supabaseUrl: env.SUPABASE_URL,
+  supabaseKey: env.SUPABASE_SECRET_KEY,
   sheetId: env.SHEET_ID,
   keyJson: env.GOOGLE_SA_JSON,
   keyFile: path.resolve(env.GOOGLE_KEY_FILE || 'service-account.json'),
@@ -40,6 +43,7 @@ async function main() {
   const mode = process.argv[2] || 'auto';
   await store.init();
   const n = now();
+  if (mode === 'backup') { await backup(n); return; }
   const [tasks, logs] = await Promise.all([store.all('Tasks'), store.all('Logs')]);
   console.log(`เวลาไทย ${n.date} ${n.time} | โหมด ${mode} | งาน ${tasks.length} รายการ`);
 
@@ -70,5 +74,20 @@ async function main() {
     await store.upsert('Snapshots', 'date', { date: y, planned: d.planned, done: d.done, pct: d.pct, by_owner_json: JSON.stringify(d.byOwner) });
     console.log(`✔ บันทึก KPI ${y}: ${d.done}/${d.planned} (${d.pct}%)`);
   }
+
+  // 4) สำรองข้อมูลลง Google Sheet วันละครั้ง (หลัง 19:00 น.)
+  if (USE_SB && env.SHEET_ID && t >= (env.BACKUP_TIME || '19:00') && (await getMeta('last_backup')) !== n.date) await backup(n);
+}
+
+async function backup(n) {
+  if (!USE_SB || !env.SHEET_ID) { console.log('· ข้ามการสำรอง (ยังไม่ได้ตั้งค่า Supabase หรือ SHEET_ID)'); return; }
+  const sheet = createStore({ storage: 'sheets', sheetId: env.SHEET_ID, keyJson: env.GOOGLE_SA_JSON, keyFile: path.resolve(env.GOOGLE_KEY_FILE || 'service-account.json') });
+  const counts = [];
+  for (const tab of ['Tasks', 'Logs', 'Snapshots', 'Meta', 'People', 'Categories']) {
+    const rows = await store.all(tab);
+    await sheet.replaceAll(tab, rows); counts.push(`${tab} ${rows.length}`);
+  }
+  await setMeta('last_backup', n.date);
+  console.log('✔ สำรองลง Google Sheet แล้ว: ' + counts.join(', '));
 }
 main().catch(e => { console.error('✖', e.message); process.exit(1); });

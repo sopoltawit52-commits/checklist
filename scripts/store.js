@@ -112,6 +112,14 @@ class SheetsStore {
       return merged;
     });
   }
+  // สำรองข้อมูล: เขียนทับทั้งแท็บ
+  async replaceAll(tab, rows) {
+    const head = SCHEMA[tab];
+    const values = [head, ...rows.map(r => head.map(h => (r[h] === undefined || r[h] === null ? '' : String(r[h]))))];
+    await this._req(`${this.base}/values/${tab}!A:Z:clear`, { method: 'POST', body: '{}' });
+    await this._req(`${this.base}/values/${tab}!A1?valueInputOption=RAW`, { method: 'PUT', body: JSON.stringify({ values }) });
+    delete this.cache[tab];
+  }
   async upsert(tab, keyField, obj) {
     delete this.cache[tab];
     const rows = await this._rows(tab);
@@ -120,7 +128,48 @@ class SheetsStore {
   }
 }
 
+// ---------------------------------------------------------------- Supabase (ฐานข้อมูลหลักตั้งแต่ ต.ค. 2569)
+const T = { Tasks: 'tasks', Logs: 'logs', Snapshots: 'snapshots', Meta: 'meta', People: 'people', Categories: 'categories' };
+class SupabaseStore {
+  constructor(url, key) {
+    this.url = url.replace(/\/+$/, '');
+    this.h = { apikey: key, 'Content-Type': 'application/json', ...(key.startsWith('eyJ') ? { Authorization: 'Bearer ' + key } : {}) };
+  }
+  async _req(path, opts = {}) {
+    for (let i = 0; ; i++) {
+      const res = await fetch(this.url + path, { ...opts, headers: { ...this.h, ...(opts.headers || {}) } });
+      if (res.ok) { const t = await res.text(); return t ? JSON.parse(t) : null; }
+      const msg = `Supabase ${res.status}: ${(await res.text()).slice(0, 300)}`;
+      if (res.status < 500 || i >= 2) throw new Error(msg);
+      await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+    }
+  }
+  async init() { await this._req('/rest/v1/meta?select=key&limit=1'); console.log('✔ เชื่อมต่อ Supabase แล้ว'); }
+  async all(tab, filter = '') {
+    const out = [];
+    for (let from = 0; ; from += 1000) {
+      const rows = await this._req(`/rest/v1/${T[tab]}?select=*${filter}`, { headers: { Range: `${from}-${from + 999}` } });
+      out.push(...rows); if (rows.length < 1000) break;
+    }
+    return out.map(r => { const o = {}; for (const k in r) o[k] = r[k] == null ? '' : String(r[k]); return o; });
+  }
+  _clean(tab, obj) { const o = {}; for (const h of SCHEMA[tab]) if (obj[h] !== undefined) o[h] = obj[h] === null ? '' : String(obj[h]); return o; }
+  async append(tab, obj) { await this._req(`/rest/v1/${T[tab]}`, { method: 'POST', headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' }, body: JSON.stringify(this._clean(tab, obj)) }); return obj; }
+  async update(tab, keyField, key, patch) {
+    const rows = await this._req(`/rest/v1/${T[tab]}?${keyField}=eq.${encodeURIComponent(key)}`, { method: 'PATCH', headers: { Prefer: 'return=representation' }, body: JSON.stringify(this._clean(tab, patch)) });
+    if (!rows || !rows.length) throw new Error('ไม่พบข้อมูล ' + key);
+    return rows[0];
+  }
+  async upsert(tab, keyField, obj) {
+    await this._req(`/rest/v1/${T[tab]}?on_conflict=${keyField}`, { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(this._clean(tab, obj)) });
+  }
+}
+
 function createStore(cfg) {
+  if (cfg.storage === 'supabase') {
+    if (!cfg.supabaseUrl || !cfg.supabaseKey) throw new Error('ยังไม่ได้ตั้งค่า SUPABASE_URL / SUPABASE_SECRET_KEY');
+    return new SupabaseStore(cfg.supabaseUrl, cfg.supabaseKey);
+  }
   if (cfg.storage === 'sheets') {
     if (!cfg.sheetId) throw new Error('ยังไม่ได้ตั้งค่า SHEET_ID');
     return new SheetsStore(cfg.sheetId, cfg.keyFile, cfg.keyJson);
@@ -128,4 +177,4 @@ function createStore(cfg) {
   return new LocalStore(cfg.localFile);
 }
 
-module.exports = { createStore, SCHEMA };
+module.exports = { createStore, SCHEMA, SheetsStore, SupabaseStore };
