@@ -150,6 +150,15 @@ details.card>summary{cursor:pointer;color:var(--muted);font-size:14px}
 .stats.s4{grid-template-columns:repeat(4,1fr)}
 @media (max-width:520px){.stats.s4{grid-template-columns:repeat(2,1fr)}}
 nav button{font-size:11px}
+.rp{border:1px solid var(--line);border-radius:10px;padding:8px 12px}
+.rp-opt{display:flex!important;gap:8px;align-items:center;margin:6px 0!important;color:var(--ink)!important;font-size:14px!important}
+.rp-opt input,.rp-inline input{width:auto}
+.rp-inline{display:inline-flex!important;gap:4px;align-items:center;margin:0!important;color:var(--ink)!important;font-size:14px!important}
+.rp-sub{margin:0 0 8px 24px;display:none;font-size:14px}
+.rp-sub.on{display:block}
+.rp-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px}
+.rp-row select{width:auto}.rp-row input[type=date]{width:auto}
+.rp-anchor{color:var(--muted);font-size:13px;display:inline-flex;gap:6px;align-items:center}
 dialog#ppDlg{border:0;border-radius:16px;padding:18px;width:min(460px,calc(100vw - 32px));background:var(--card);color:var(--ink);box-shadow:0 10px 40px rgba(0,0,0,.25)}
 dialog#ppDlg::backdrop{background:rgba(0,0,0,.4)}
 .pp-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -288,9 +297,28 @@ dialog#ppDlg::backdrop{background:rgba(0,0,0,.4)}
           <div class="full"><label>ประเภทงาน</label>
             <div class="seg">
               <label><input type="radio" name="type" value="once" checked><span>ครั้งเดียว / นัดหมาย</span></label>
-              <label><input type="radio" name="type" value="daily"><span>ประจำวัน (ทำทุกวัน)</span></label>
+              <label><input type="radio" name="type" value="daily"><span>งานประจำ (ทำซ้ำ)</span></label>
               <label><input type="radio" name="type" value="backlog"><span>รายการค้าง (ไม่มีกำหนดวัน)</span></label>
               <label><input type="radio" name="type" value="plan"><span>งานตามแผน (เริ่ม–สิ้นสุด)</span></label>
+            </div>
+          </div>
+          <div id="repeatWrap" class="full hidden">
+            <label>รอบการทำซ้ำ</label>
+            <div class="rp">
+              <label class="rp-opt"><input type="radio" name="rmode" value="workdays" checked> ทุกวันทำงาน</label>
+              <label class="rp-opt"><input type="radio" name="rmode" value="weekly"> เลือกวันในสัปดาห์</label>
+              <div class="rp-sub" data-for="weekly">
+                <div class="pick" id="rDays"></div>
+                <div class="rp-row">ทุก <select name="revery"><option value="1">1 สัปดาห์ (ทุกสัปดาห์)</option><option value="2">2 สัปดาห์ (เว้นสัปดาห์)</option><option value="3">3 สัปดาห์</option><option value="4">4 สัปดาห์</option></select>
+                  <span class="rp-anchor">เริ่มนับจากสัปดาห์ของวันที่ <input type="date" name="ranchor"></span></div>
+              </div>
+              <label class="rp-opt"><input type="radio" name="rmode" value="monthly"> รายเดือน</label>
+              <div class="rp-sub" data-for="monthly">
+                <div class="rp-row"><label class="rp-inline"><input type="radio" name="rmkind" value="day" checked> วันที่</label> <select name="rmday"></select> ของทุกเดือน</div>
+                <div class="rp-row"><label class="rp-inline"><input type="radio" name="rmkind" value="nth"> ทุก</label> <select name="rnth"><option value="1">แรก</option><option value="2">ที่ 2</option><option value="3">ที่ 3</option><option value="4">ที่ 4</option><option value="-1">สุดท้าย</option></select> <select name="rdow"><option value="1">จันทร์</option><option value="2">อังคาร</option><option value="3">พุธ</option><option value="4">พฤหัสฯ</option><option value="5">ศุกร์</option><option value="6">เสาร์</option><option value="0">อาทิตย์</option></select> ของเดือน</div>
+              </div>
+              <label class="rp-opt"><input type="radio" name="rmode" value="quota"> สัปดาห์ละ X ครั้ง (วันไหนก็ได้)</label>
+              <div class="rp-sub" data-for="quota"><div class="rp-row">สัปดาห์ละ <select name="rtimes"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option></select> ครั้ง — ขึ้นทุกวันทำงานจนกว่าจะครบ แล้วหายไปถึงสัปดาห์หน้า</div></div>
             </div>
           </div>
           <div id="planStartWrap" class="hidden"><label>วันเริ่มงาน *</label><input type="date" name="start_date"></div>
@@ -389,11 +417,11 @@ dialog#ppDlg::backdrop{background:rgba(0,0,0,.4)}
   </form>
 </dialog>
 
-<script src="config.js?v=10"></script>
-<script src="logic.js?v=10"></script>
-<script src="demo-data.js?v=10"></script>
-<script src="store-browser.js?v=10"></script>
+<script src="config.js?v=11"></script>
+<script src="logic.js?v=11"></script>
+<script src="demo-data.js?v=11"></script>
+<script src="store-browser.js?v=11"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
-<script src="app.js?v=10"></script>
+<script src="app.js?v=11"></script>
 </body>
 </html>

@@ -101,7 +101,8 @@ function taskRow(t, mode) {
   }
   if (t.overdue) tags.push(`<span class="tag over">เกินกำหนด ${fmtDue(t.due_date)}</span>`);
   else if (t.type === 'once' && t.due_date) tags.push(`<span class="tag">${t.today ? 'วันนี้' : 'กำหนด ' + fmtDue(t.due_date)}</span>`);
-  tags.push(t.type === 'daily' ? '<span class="tag daily">ประจำวัน</span>' : t.type === 'backlog' ? '<span class="tag backlog">รายการค้าง</span>' : t.type === 'plan' ? '<span class="tag plan">งานตามแผน</span>' : '<span class="tag">ครั้งเดียว</span>');
+  if (t.quota) tags.push(`<span class="tag ${t.quota.done >= t.quota.times ? 'ok' : 'high'}">สัปดาห์นี้ ${t.quota.done}/${t.quota.times}</span>`);
+  tags.push(t.type === 'daily' ? `<span class="tag daily">🔁 ${esc(L.repeatLabel(t))}</span>` : t.type === 'backlog' ? '<span class="tag backlog">รายการค้าง</span>' : t.type === 'plan' ? '<span class="tag plan">งานตามแผน</span>' : '<span class="tag">ครั้งเดียว</span>');
   if (t.priority === 'สูง') tags.push('<span class="tag high">สำคัญสูง</span>');
   if (t.owner) tags.push(`<span>👤 ${esc(L.owners(t).join(', '))}</span>`);
   if (t.category) tags.push(`<span>${catDot(t.category)}${esc(t.category)}</span>`);
@@ -256,6 +257,7 @@ function resetForm() {
   $('#cancelEdit').classList.add('hidden'); applyType('once');
   $('#ownerPick').querySelectorAll('input').forEach(i => (i.checked = false));
   f.elements['due_date'].value = L.today(); f.elements['start_date'].value = L.today(); f.elements['end_date'].value = L.addDays(L.today(), 7);
+  fillRepeat(f, {});
 }
 function editTask(id) {
   const t = DATA.Tasks.find(x => x.id === id); if (!t) return;
@@ -271,11 +273,45 @@ function editTask(id) {
   f.elements['start_date'].value = L.normDate(t.start_date) || L.normDate(t.created_at); f.elements['end_date'].value = L.normDate(t.due_date);
   f.querySelector(`[name=type][value=${ty}]`).checked = true;
   f.elements['due_date'].value = L.normDate(t.due_date); f.elements['time'].value = L.normTime(t.time); f.elements['remind_before'].value = t.remind_before || '30'; f.elements['note'].value = t.note;
-  applyType(ty);
+  applyType(ty); fillRepeat(f, t);
   $('#formTitle').textContent = '✏️ แก้ไขงาน'; $('#saveBtn').textContent = 'บันทึกการแก้ไข'; $('#cancelEdit').classList.remove('hidden');
 }
 $('#cancelEdit').onclick = () => { resetForm(); show('manage'); };
+// ---- ตั้งค่ารอบการทำซ้ำ
+(function initRepeat() {
+  $('#rDays').innerHTML = [1, 2, 3, 4, 5, 6, 0].map(d => `<label><input type="checkbox" name="rday" value="${d}">${L.DOW_TH[d]}</label>`).join('');
+  $('#addForm').elements['rmday'].innerHTML = Array.from({ length: 31 }, (_, i) => `<option>${i + 1}</option>`).join('');
+})();
+function applyRepeat() {
+  const f = $('#addForm'), m = f.querySelector('[name=rmode]:checked')?.value || 'workdays';
+  f.querySelectorAll('.rp-sub').forEach(el => el.classList.toggle('on', el.dataset.for === m));
+  f.querySelector('.rp-anchor').style.display = f.elements['revery'].value === '1' ? 'none' : '';
+}
+function readRepeat(f) {
+  const m = f.querySelector('[name=rmode]:checked')?.value || 'workdays';
+  if (m === 'weekly') {
+    const days = [...f.querySelectorAll('[name=rday]:checked')].map(i => +i.value);
+    if (!days.length) throw new Error('เลือกวันในสัปดาห์อย่างน้อย 1 วัน');
+    const every = +f.elements['revery'].value;
+    return JSON.stringify({ mode: 'weekly', days, every, ...(every > 1 ? { anchor: f.elements['ranchor'].value || L.today() } : {}) });
+  }
+  if (m === 'monthly') return JSON.stringify(f.querySelector('[name=rmkind]:checked').value === 'nth' ? { mode: 'monthly', nth: +f.elements['rnth'].value, dow: +f.elements['rdow'].value } : { mode: 'monthly', day: +f.elements['rmday'].value });
+  if (m === 'quota') return JSON.stringify({ mode: 'quota', times: +f.elements['rtimes'].value });
+  return '';
+}
+function fillRepeat(f, t) {
+  const r = L.repeatOf(t);
+  f.querySelector(`[name=rmode][value=${r.mode}]`).checked = true;
+  f.querySelectorAll('[name=rday]').forEach(i => (i.checked = (r.days || []).map(Number).includes(+i.value)));
+  f.elements['revery'].value = String(r.every || 1); f.elements['ranchor'].value = L.normDate(r.anchor) || L.today();
+  f.querySelector(`[name=rmkind][value=${r.nth ? 'nth' : 'day'}]`).checked = true;
+  f.elements['rmday'].value = String(r.day || 1); f.elements['rnth'].value = String(r.nth || 1); f.elements['rdow'].value = String(r.dow ?? 1);
+  f.elements['rtimes'].value = String(r.times || 2);
+  applyRepeat();
+}
+$('#addForm').addEventListener('change', e => { if (['rmode', 'revery'].includes(e.target.name)) applyRepeat(); if (e.target.name === 'rday') { const f = $('#addForm'); f.querySelector('[name=rmode][value=weekly]').checked = true; applyRepeat(); } });
 function applyType(ty) {
+  $('#repeatWrap').classList.toggle('hidden', ty !== 'daily');
   $('#dueWrap').classList.toggle('hidden', ty !== 'once');
   $('#timeWrap').classList.toggle('hidden', ty === 'backlog' || ty === 'plan');
   $('#remindWrap').classList.toggle('hidden', ty === 'backlog' || ty === 'plan');
@@ -290,12 +326,14 @@ $('#addForm').addEventListener('submit', async e => {
   const isPlan = fd.type === 'plan';
   if (isPlan && (!fd.start_date || !fd.end_date)) return toast('กรุณาใส่วันเริ่มและวันสิ้นสุด');
   if (isPlan && fd.end_date < fd.start_date) return toast('วันสิ้นสุดต้องไม่ก่อนวันเริ่ม');
+  let repeat = '';
+  if (fd.type === 'daily') { try { repeat = readRepeat(e.target); } catch (err) { return toast(err.message); } }
   const btn = $('#saveBtn'); btn.disabled = true;
   const noTime = fd.type === 'backlog' || isPlan;
   const data = {
     title: fd.title.trim(), owner: (fd.owner || '').trim(), category: (fd.category || '').trim(), priority: fd.priority,
     type: fd.type, due_date: fd.type === 'once' ? fd.due_date : isPlan ? fd.end_date : '', start_date: isPlan ? fd.start_date : '',
-    time: noTime ? '' : (fd.time || ''), remind_before: !noTime && fd.time ? fd.remind_before : '', note: fd.note || '',
+    time: noTime ? '' : (fd.time || ''), remind_before: !noTime && fd.time ? fd.remind_before : '', note: fd.note || '', repeat,
   };
   try {
     if (fd.task_id) {
@@ -317,7 +355,7 @@ async function loadManage() {
   const { Tasks, Logs } = await refresh();
   const list = Tasks.filter(t => (t.status || 'open') === mStatus)
     .sort((a, b) => ({ daily: 0, once: 1, plan: 2, backlog: 3 }[a.type] ?? 1) - ({ daily: 0, once: 1, plan: 2, backlog: 3 }[b.type] ?? 1) || String(L.normDate(a.due_date) || '9').localeCompare(String(L.normDate(b.due_date) || '9')) || L.normTime(a.time).localeCompare(L.normTime(b.time)));
-  $('#mBody').innerHTML = list.length ? list.map(t => `<tr><td><b>${esc(t.title)}</b><div class="meta"><span class="tag ${t.type === 'once' ? '' : t.type}">${L.TYPE_LABEL[t.type] || 'ครั้งเดียว'}</span>${t.time ? `<span class="tag time">🕐 ${esc(L.normTime(t.time))}</span>` : ''}${t.owner ? `<span>👤 ${esc(L.owners(t).join(', '))}</span>` : ''}${t.type === 'plan' ? `<span>📆 ${fmtDue(t.start_date || t.created_at)} – ${fmtDue(t.due_date)}</span><span class="tag st st-${L.planInfo(t).state}">${L.planInfo(t).label}</span>` : t.due_date ? `<span>กำหนด ${fmtDue(t.due_date)}</span>` : ''}${t.done_at ? `<span>เสร็จ ${fmtDue(t.done_at)}</span>` : ''}</div></td>
+  $('#mBody').innerHTML = list.length ? list.map(t => `<tr><td><b>${esc(t.title)}</b><div class="meta"><span class="tag ${t.type === 'once' ? '' : t.type}">${t.type === 'daily' ? '🔁 ' + esc(L.repeatLabel(t)) : (L.TYPE_LABEL[t.type] || 'ครั้งเดียว')}</span>${t.time ? `<span class="tag time">🕐 ${esc(L.normTime(t.time))}</span>` : ''}${t.owner ? `<span>👤 ${esc(L.owners(t).join(', '))}</span>` : ''}${t.type === 'plan' ? `<span>📆 ${fmtDue(t.start_date || t.created_at)} – ${fmtDue(t.due_date)}</span><span class="tag st st-${L.planInfo(t).state}">${L.planInfo(t).label}</span>` : t.due_date ? `<span>กำหนด ${fmtDue(t.due_date)}</span>` : ''}${t.done_at ? `<span>เสร็จ ${fmtDue(t.done_at)}</span>` : ''}</div></td>
     <td><button class="btn ghost sm" data-edit="${t.id}">แก้ไข</button> ${mStatus === 'open' ? `<button class="btn danger sm" data-ms="cancel" data-id="${t.id}">ยกเลิก</button>` : `<button class="btn ghost sm" data-ms="open" data-id="${t.id}">เปิดใหม่</button>`}</td></tr>`).join('') : '<tr><td class="empty">ไม่มีรายการ</td></tr>';
   $('#preview').textContent = L.morningMessage(Tasks, Logs, location.href.split('#')[0], { includeDaily: false });
 }

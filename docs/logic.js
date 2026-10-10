@@ -7,7 +7,7 @@
   let WORK_DAYS = new Set([1, 2, 3, 4, 5, 6]);
 
   const SCHEMA = {
-    Tasks: ['id', 'title', 'owner', 'category', 'priority', 'type', 'due_date', 'time', 'remind_before', 'status', 'created_at', 'created_by', 'done_at', 'reminded', 'note', 'start_date', 'postpone_log'],
+    Tasks: ['id', 'title', 'owner', 'category', 'priority', 'type', 'due_date', 'time', 'remind_before', 'status', 'created_at', 'created_by', 'done_at', 'reminded', 'note', 'start_date', 'postpone_log', 'repeat'],
     Logs: ['log_id', 'date', 'time', 'task_id', 'title', 'owner', 'done_by', 'type', 'note', 'void'],
     Snapshots: ['date', 'planned', 'done', 'pct', 'by_owner_json'],
     Meta: ['key', 'value'],
@@ -50,7 +50,43 @@
   const owners = t => String((t && t.owner) || '').split(/\s*,\s*/).map(x => x.trim()).filter(Boolean);
   // ประวัติการเลื่อนวัน เก็บใน tasks.postpone_log เป็น JSON [{at, by, from, to, reason}]
   function postpones(t) { try { const a = JSON.parse((t && t.postpone_log) || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } }
-  const TYPE_LABEL = { daily: 'ประจำวัน', once: 'ครั้งเดียว', backlog: 'รายการค้าง', plan: 'งานตามแผน' };
+// ---------------------------------------------------------------- งานประจำ (ทำซ้ำตามรอบ) — tasks.repeat เป็น JSON
+  // ''/{mode:'workdays'} | {mode:'weekly',days:[1,5],every:2,anchor:'YYYY-MM-DD'} | {mode:'monthly',day:1} | {mode:'monthly',nth:1,dow:1} | {mode:'quota',times:2}
+  const DOW_TH = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
+  const DOW_FULL = ['วันอาทิตย์', 'วันจันทร์', 'วันอังคาร', 'วันพุธ', 'วันพฤหัสฯ', 'วันศุกร์', 'วันเสาร์'];
+  function repeatOf(t) { try { const r = JSON.parse((t && t.repeat) || 'null'); return r && r.mode ? r : { mode: 'workdays' }; } catch { return { mode: 'workdays' }; } }
+  const dowOf = d => new Date(d + 'T00:00:00Z').getUTCDay();
+  const weekIdx = d => Math.floor((Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10)) / 86400000 - ((dowOf(d) + 6) % 7) + 3) / 7); // สัปดาห์เริ่มวันจันทร์
+  const weekStart = d => addDays(d, -((dowOf(d) + 6) % 7));
+  function isScheduled(t, date) {
+    const r = repeatOf(t);
+    if (r.mode === 'weekly') {
+      const days = (r.days || []).map(Number);
+      if (!days.includes(dowOf(date))) return false;
+      const every = Math.max(+r.every || 1, 1);
+      const anchor = normDate(r.anchor) || normDate(t.created_at) || date;
+      return ((weekIdx(date) - weekIdx(anchor)) % every + every) % every === 0;
+    }
+    if (r.mode === 'monthly') {
+      const y = +date.slice(0, 4), m = +date.slice(5, 7), dd = +date.slice(8, 10);
+      const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+      if (r.nth) {
+        const dow = +r.dow, nth = +r.nth;
+        if (dowOf(date) !== dow) return false;
+        return nth === -1 ? dd + 7 > last : Math.ceil(dd / 7) === nth;
+      }
+      return dd === Math.min(+r.day || 1, last);
+    }
+    return isWorkDay(date); // workdays + quota (โผล่ทุกวันทำงานจนกว่าจะครบ)
+  }
+  function repeatLabel(t) {
+    const r = repeatOf(t);
+    if (r.mode === 'weekly') { const ds = (r.days || []).map(Number).sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)).map(x => DOW_TH[x]).join(', '); const e = +r.every || 1; return `ทุก ${ds}${e === 2 ? ' (เว้นสัปดาห์)' : e > 2 ? ` (ทุก ${e} สัปดาห์)` : ''}`; }
+    if (r.mode === 'monthly') return r.nth ? `${DOW_FULL[r.dow]}${+r.nth === -1 ? 'สุดท้าย' : ['', 'แรก', 'ที่ 2', 'ที่ 3', 'ที่ 4'][r.nth]}ของเดือน` : `ทุกวันที่ ${r.day || 1} ของเดือน`;
+    if (r.mode === 'quota') return `สัปดาห์ละ ${r.times || 1} ครั้ง`;
+    return 'ทุกวันทำงาน';
+  }
+  const TYPE_LABEL = { daily: 'งานประจำ', once: 'ครั้งเดียว', backlog: 'รายการค้าง', plan: 'งานตามแผน' };
   const dayDiff = (a, b) => Math.round((new Date(b + 'T00:00:00Z') - new Date(a + 'T00:00:00Z')) / 86400000);
 
   // ---------------------------------------------------------------- งานตามแผน (มีวันเริ่ม–วันสิ้นสุด)
@@ -115,8 +151,16 @@
       }
       if (t.type === 'daily') {
         const log = doneIds.get(t.id);
-        if (!workDay && !log) continue;
-        items.push({ ...t, done: !!log, done_time: log ? log.time : '', done_by: log ? log.done_by : '', overdue: false, today: true });
+        const r = repeatOf(t);
+        let quota = null;
+        if (r.mode === 'quota') {
+          const ws = weekStart(date), times = Math.max(+r.times || 1, 1);
+          const before = new Set(logs.filter(l => l.task_id === t.id && l.void !== 'Y' && normDate(l.date) >= ws && normDate(l.date) < date).map(l => normDate(l.date))).size;
+          if (before >= times && !log) continue; // ครบโควตาสัปดาห์นี้แล้ว
+          quota = { done: before + (log ? 1 : 0), times };
+        }
+        if (!log && !isScheduled(t, date)) continue;
+        items.push({ ...t, done: !!log, done_time: log ? log.time : '', done_by: log ? log.done_by : '', overdue: false, today: true, quota, repeatText: repeatLabel(t) });
         continue;
       }
       const doneDate = normDate(t.done_at);
@@ -131,7 +175,8 @@
         items.push({ ...t, done: false, overdue: !!due && due < date, today: due === date });
       } else items.push({ ...t, done: false, upcoming: true });
     }
-    const planned = items.filter(i => !i.upcoming);
+    const active = items.filter(i => !i.upcoming);
+    const planned = active.filter(i => !(i.quota && !i.done)); // งาน 'สัปดาห์ละ X ครั้ง' นับ KPI เฉพาะวันที่ทำ
     const done = planned.filter(i => i.done).length;
     const byOwner = {};
     for (const i of planned) {
@@ -147,7 +192,7 @@
       overdue: planned.filter(i => i.overdue && !i.done).length,
       pct: planned.length ? Math.round((done / planned.length) * 100) : 0,
       byOwner: Object.values(byOwner).sort((a, b) => b.pct - a.pct),
-      todo: planned.filter(i => !i.done).sort(sort),
+      todo: active.filter(i => !i.done).sort(sort),
       completed: planned.filter(i => i.done).sort((a, b) => String(a.done_time).localeCompare(String(b.done_time))),
       upcoming: items.filter(i => i.upcoming).sort(sort),
       backlog: backlog.sort((a, b) => ((PRIO_RANK[a.priority] ?? 1) - (PRIO_RANK[b.priority] ?? 1)) || String(a.created_at).localeCompare(String(b.created_at))),
@@ -206,6 +251,7 @@
     const day = buildDay(tasks, logs, d);
     const appts = day.todo.filter(t => t.type === 'once' && t.today);
     const daily = day.todo.filter(t => t.type === 'daily');
+    const roundly = daily.filter(t => repeatOf(t).mode !== 'workdays'); // งานประจำตามรอบ (ไม่ใช่ทุกวัน) — แสดงเสมอ กันลืม
     const pending = day.todo.filter(t => t.type === 'once' && !t.today);
     const L = [`☀️ งานวันนี้ — ${longDate(d)}`];
 
@@ -213,9 +259,10 @@
     if (appts.length) appts.forEach(t => L.push(`${t.time ? `🕐 ${t.time} น.` : '▫️'} ${t.title}${who(t)}`));
     else L.push('— ไม่มี —');
 
-    if (opt.includeDaily !== false && daily.length) {
-      L.push('', `🔁 งานประจำวัน (${daily.length})`);
-      daily.forEach(t => L.push(`${t.time ? `🕐 ${t.time}` : '▫️'} ${t.title}${who(t)}`));
+    const showDaily = opt.includeDaily !== false ? daily : roundly;
+    if (showDaily.length) {
+      L.push('', `🔁 งานประจำ${opt.includeDaily !== false ? '' : 'ตามรอบ'}วันนี้ (${showDaily.length})`);
+      showDaily.forEach(t => L.push(`${t.time ? `🕐 ${t.time}` : '▫️'} ${t.title}${t.quota ? ` (สัปดาห์นี้ ${t.quota.done}/${t.quota.times})` : repeatOf(t).mode !== 'workdays' ? ` [${repeatLabel(t)}]` : ''}${who(t)}`));
     }
 
     L.push('', `⏳ งานค้าง (${pending.length})`);
@@ -261,5 +308,5 @@
     return L.join('\n');
   }
 
-  return { owners, postpones, TYPE_LABEL, PLAN_LABEL, planInfo, buildSchedule, dayDiff, SCHEMA, TZ, nowParts, today, addDays, normDate, normTime, toMin, fromMin, setWorkDays, isWorkDay, newId, buildDay, buildHistory, dueReminders, morningMessage, reminderMessage };
+  return { owners, postpones, repeatOf, repeatLabel, isScheduled, DOW_TH, TYPE_LABEL, PLAN_LABEL, planInfo, buildSchedule, dayDiff, SCHEMA, TZ, nowParts, today, addDays, normDate, normTime, toMin, fromMin, setWorkDays, isWorkDay, newId, buildDay, buildHistory, dueReminders, morningMessage, reminderMessage };
 });
