@@ -167,7 +167,10 @@ dialog#ppDlg::backdrop{background:rgba(0,0,0,.4)}
 .pp-hist div{margin:3px 0}
 .ppbtn{flex:none;font:inherit;font-size:12px;border:1px solid var(--line);background:var(--card);color:var(--muted);border-radius:8px;padding:3px 8px;cursor:pointer;margin-left:auto;white-space:nowrap}
 .ppbtn:hover{color:var(--warn);border-color:var(--warn)}
-.task.moved{opacity:.75}
+.task.moved{opacity:.9}
+.btncol{display:flex;flex-direction:column;gap:6px;margin-left:auto}
+.okbtn{color:var(--brand);border-color:var(--brand);background:var(--brand-soft);font-weight:600}
+.btncol .ppbtn{margin-left:0}
 .tag.pp{background:var(--warn-soft);color:var(--warn)}
 .sync{font-size:12px;color:var(--muted);white-space:nowrap;cursor:pointer}
 .sync.err{color:var(--bad)}
@@ -421,11 +424,11 @@ dialog#ppDlg::backdrop{background:rgba(0,0,0,.4)}
   </form>
 </dialog>
 
-<script src="config.js?v=13"></script>
-<script src="logic.js?v=13"></script>
-<script src="demo-data.js?v=13"></script>
-<script src="store-browser.js?v=13"></script>
+<script src="config.js?v=14"></script>
+<script src="logic.js?v=14"></script>
+<script src="demo-data.js?v=14"></script>
+<script src="store-browser.js?v=14"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
-<script src="app.js?v=13"></script>
+<script src="app.js?v=14"></script>
 </body>
 </html>

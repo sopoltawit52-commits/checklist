@@ -111,7 +111,7 @@ function taskRow(t, mode) {
   if (pp.length) tags.push(`<span class="tag pp" title="${esc(pp.map(x => `${x.from} → ${x.to}: ${x.reason}`).join('\n'))}">↪️ เลื่อน ${pp.length} ครั้ง${pp[pp.length - 1].reason ? ': ' + esc(pp[pp.length - 1].reason) : ''}</span>`);
   if (mode === 'done') tags.push(`<span class="tag ok">✓ ${esc(t.done_time || '')}${t.done_by ? ' โดย ' + esc(t.done_by) : ''}</span>`);
   if (t.occFrom) tags.push(`<span class="tag pp">✓ ทำแทนรอบ ${fmtDue(t.occFrom)} (ทำก่อนกำหนด)</span>`);
-  const cb = mode === 'up' ? '' : `<button class="cb" aria-label="${mode === 'done' ? 'ยกเลิกเสร็จ' : 'ทำเสร็จ'}" data-id="${t.id}" data-act="${mode === 'done' ? 'undo' : 'done'}"${t.occLog ? ` data-log="${t.occLog}"` : ''}></button>`;
+  const cb = `<button class="cb" aria-label="${mode === 'done' ? 'ยกเลิกเสร็จ' : 'ทำเสร็จ'}" data-id="${t.id}" data-act="${mode === 'done' ? 'undo' : 'done'}"${t.occLog ? ` data-log="${t.occLog}"` : ''}></button>`;
   const prog = t.type === 'plan' && mode !== 'done' && t.state ? `<div class="prog st-${t.state}" title="ใช้เวลาไปแล้ว ${t.timePct}% ของระยะเวลา"><i style="width:${t.timePct}%"></i></div>` : '';
   const ppb = mode !== 'done' && (t.type === 'once' || t.type === 'plan' || (t.type === 'daily' && mode === 'todo' && t.today && !t.quota)) ? `<button class="ppbtn" data-pp="${t.id}" title="${t.type === 'daily' ? 'เลื่อนหรือข้ามเฉพาะรอบนี้' : 'เลื่อนวัน'}">⏭️ เลื่อน</button>` : '';
   return `<div class="task ${mode === 'done' ? 'done' : ''}">${cb}<div class="body"><div class="title">${esc(t.title)}</div><div class="meta">${tags.join('')}</div>${prog}${t.note ? `<div class="meta">📝 ${esc(t.note)}</div>` : ''}</div>${ppb}</div>`;
@@ -156,7 +156,7 @@ async function loadToday() {
   $('#doneList').innerHTML = done.length ? done.map(t => taskRow(t, 'done')).join('') : '<div class="empty">ยังไม่มีงานที่ทำเสร็จวันนี้</div>';
   const mo = f(d.movedOut);
   $('#movedWrap').classList.toggle('hidden', !mo.length); $('#movedCount').textContent = mo.length;
-  $('#movedList').innerHTML = mo.map(t => `<div class="task moved"><button class="cb" aria-label="ทำเสร็จแล้ว (ก่อนกำหนด)" title="ทำเสร็จแล้ว" data-id="${t.id}" data-act="done" data-occ="${t.move.from}"></button><div class="body"><div class="title">${esc(t.title)}</div><div class="meta"><span class="tag pp">${t.skip ? '⏭️ ข้ามรอบนี้' : t.pending ? `↪️ รอบ ${fmtDue(t.move.from)} เลื่อนไว้ไป ${fmtDue(t.move.to)} — ทำก่อนได้` : '↪️ เลื่อนไป ' + fmtDue(t.move.to)}</span>${t.move.reason ? `<span>💬 ${esc(t.move.reason)}</span>` : ''}${t.move.by ? `<span class="muted">โดย ${esc(t.move.by)}</span>` : ''}${t.owner ? `<span>👤 ${esc(L.owners(t).join(', '))}</span>` : ''}</div></div>${t.pending ? '' : `<button class="ppbtn" data-unmove="${t.id}" title="ยกเลิกการเลื่อน">↩️ ยกเลิก</button>`}</div>`).join('');
+  $('#movedList').innerHTML = mo.map(t => `<div class="task moved"><button class="cb" aria-label="ทำเสร็จแล้ว (ก่อนกำหนด)" title="ทำเสร็จแล้ว" data-id="${t.id}" data-act="done" data-occ="${t.move.from}"></button><div class="body"><div class="title">${esc(t.title)}</div><div class="meta"><span class="tag pp">${t.skip ? '⏭️ ข้ามรอบนี้' : t.pending ? `↪️ รอบ ${fmtDue(t.move.from)} เลื่อนไว้ไป ${fmtDue(t.move.to)} — ทำก่อนได้` : '↪️ เลื่อนไป ' + fmtDue(t.move.to)}</span>${t.move.reason ? `<span>💬 ${esc(t.move.reason)}</span>` : ''}${t.move.by ? `<span class="muted">โดย ${esc(t.move.by)}</span>` : ''}${t.owner ? `<span>👤 ${esc(L.owners(t).join(', '))}</span>` : ''}</div></div><div class="btncol"><button class="ppbtn okbtn" data-occdone="${t.id}" data-occ="${t.move.from}">✓ ทำเสร็จแล้ว</button>${t.pending ? '' : `<button class="ppbtn" data-unmove="${t.id}" title="ยกเลิกการเลื่อน">↩️ ยกเลิก</button>`}</div></div>`).join('');
   $('#upWrap').classList.toggle('hidden', !up.length); $('#upCount').textContent = up.length;
   $('#upList').innerHTML = up.map(t => taskRow(t, 'up')).join('');
 }
@@ -593,6 +593,14 @@ $('#ppForm').addEventListener('submit', async e => {
   btn.disabled = false;
 });
 document.addEventListener('click', e => { const b = e.target.closest('[data-pp]'); if (b) { e.preventDefault(); openPostpone(b.dataset.pp); } });
+// ปุ่ม "ทำเสร็จแล้ว" ของรอบที่เลื่อนไว้ (ทำก่อนกำหนด)
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-occdone]'); if (!b) return;
+  e.preventDefault(); b.disabled = true;
+  if (!ME) askName();
+  try { await markDone(b.dataset.occdone, b.dataset.occ); toast('✔ บันทึกงานเสร็จแล้ว'); await loadToday(); }
+  catch (err) { toast('ผิดพลาด: ' + err.message); b.disabled = false; }
+});
 // ยกเลิกการเลื่อน/ข้ามรอบของงานประจำ (ลบรายการล่าสุดที่เลื่อนออกจากวันนี้)
 document.addEventListener('click', async e => {
   const b = e.target.closest('[data-unmove]'); if (!b) return;
