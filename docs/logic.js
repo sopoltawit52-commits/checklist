@@ -49,6 +49,7 @@
   // ผู้รับผิดชอบหลายคน เก็บเป็น "ชื่อ1, ชื่อ2"
   const owners = t => String((t && t.owner) || '').split(/\s*,\s*/).map(x => x.trim()).filter(Boolean);
   // ประวัติการเลื่อนวัน เก็บใน tasks.postpone_log เป็น JSON [{at, by, from, to, reason}]
+  const occOf = l => ((/^occ:(\d{4}-\d{2}-\d{2})/.exec((l && l.note) || '') || [])[1] || '');
   function postpones(t) { try { const a = JSON.parse((t && t.postpone_log) || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } }
 // ---------------------------------------------------------------- งานประจำ (ทำซ้ำตามรอบ) — tasks.repeat เป็น JSON
   // ''/{mode:'workdays'} | {mode:'weekly',days:[1,5],every:2,anchor:'YYYY-MM-DD'} | {mode:'monthly',day:1} | {mode:'monthly',nth:1,dow:1} | {mode:'quota',times:2}
@@ -150,7 +151,12 @@
         continue;
       }
       if (t.type === 'daily') {
-        const log = doneIds.get(t.id);
+        // บันทึกที่มี note 'occ:YYYY-MM-DD' = ทำแทนรอบของวันนั้น (รอบที่ถูกเลื่อน แล้วทำเสร็จก่อนวันที่เลื่อนไป)
+        const tl = logs.filter(l => l.task_id === t.id && l.void !== 'Y');
+        const dayTl = tl.filter(l => normDate(l.date) === date);
+        const log = dayTl.find(l => !occOf(l) || occOf(l) === date);
+        const extra = dayTl.filter(l => occOf(l) && occOf(l) !== date);
+        const doneOcc = new Set(tl.map(occOf).filter(Boolean));
         const r = repeatOf(t);
         let quota = null;
         if (r.mode === 'quota') {
@@ -160,13 +166,19 @@
           quota = { done: before + (log ? 1 : 0), times };
         }
         // เลื่อน/ข้ามเฉพาะรอบ (เก็บใน postpone_log: {from, to, reason} — to='' = ข้ามรอบนี้) รายการล่าสุดที่เกี่ยวกับวันนี้เป็นตัวตัดสิน
-        const mv = postpones(t).filter(m => m.from === date || m.to === date).pop();
-        const moved = mv && mv.to === date && mv.from !== date ? mv : null;
+        const moves = postpones(t);
+        const mv = moves.filter(m => m.from === date || m.to === date).pop();
+        const moved = mv && mv.to === date && mv.from !== date && !doneOcc.has(mv.from) ? mv : null; // ทำก่อนแล้ว = ไม่ต้องขึ้นอีก
+        // รอบที่เลื่อนไว้ยังไม่ถึงวัน (ทำก่อนได้)
+        const lastByFrom = {}; moves.forEach(m => { lastByFrom[m.from] = m; });
+        Object.values(lastByFrom).forEach(m => { if (m.to && m.from < date && m.to > date && !doneOcc.has(m.from)) movedOut.push({ ...t, move: m, skip: false, pending: true }); });
+        extra.forEach(l => items.push({ ...t, done: true, done_time: l.time, done_by: l.done_by, overdue: false, today: true, occFrom: occOf(l), occLog: l.log_id, repeatText: repeatLabel(t) }));
+        let show = !!log;
         if (!log) {
-          if (mv && mv.from === date) { movedOut.push({ ...t, move: mv, skip: !mv.to }); continue; }
-          if (!moved && !isScheduled(t, date)) continue;
+          if (mv && mv.from === date) movedOut.push({ ...t, move: mv, skip: !mv.to });
+          else show = !!moved || isScheduled(t, date);
         }
-        items.push({ ...t, done: !!log, done_time: log ? log.time : '', done_by: log ? log.done_by : '', overdue: false, today: true, quota, moved, repeatText: repeatLabel(t) });
+        if (show) items.push({ ...t, done: !!log, done_time: log ? log.time : '', done_by: log ? log.done_by : '', overdue: false, today: true, quota, moved, repeatText: repeatLabel(t) });
         continue;
       }
       const doneDate = normDate(t.done_at);
@@ -273,9 +285,10 @@
       showDaily.forEach(t => L.push(`${t.time ? `🕐 ${t.time}` : '▫️'} ${t.title}${t.quota ? ` (สัปดาห์นี้ ${t.quota.done}/${t.quota.times})` : repeatOf(t).mode !== 'workdays' ? ` [${repeatLabel(t)}]` : ''}${who(t)}`));
     }
 
-    if (day.movedOut.length) {
-      L.push('', `⏭️ งานประจำที่เลื่อน/ข้ามวันนี้ (${day.movedOut.length})`);
-      day.movedOut.forEach(t => L.push(`▫️ ${t.title} → ${t.skip ? 'ข้ามรอบนี้' : 'เลื่อนไป ' + shortDate(t.move.to)}${t.move.reason ? '\n' + IND + '💬 ' + t.move.reason : ''}`));
+    const mOut = day.movedOut.filter(t => !t.pending);
+    if (mOut.length) {
+      L.push('', `⏭️ งานประจำที่เลื่อน/ข้ามวันนี้ (${mOut.length})`);
+      mOut.forEach(t => L.push(`▫️ ${t.title} → ${t.skip ? 'ข้ามรอบนี้' : 'เลื่อนไป ' + shortDate(t.move.to)}${t.move.reason ? '\n' + IND + '💬 ' + t.move.reason : ''}`));
     }
 
     L.push('', `⏳ งานค้าง (${pending.length})`);
@@ -321,5 +334,5 @@
     return L.join('\n');
   }
 
-  return { owners, postpones, repeatOf, repeatLabel, isScheduled, DOW_TH, TYPE_LABEL, PLAN_LABEL, planInfo, buildSchedule, dayDiff, SCHEMA, TZ, nowParts, today, addDays, normDate, normTime, toMin, fromMin, setWorkDays, isWorkDay, newId, buildDay, buildHistory, dueReminders, morningMessage, reminderMessage };
+  return { owners, occOf, postpones, repeatOf, repeatLabel, isScheduled, DOW_TH, TYPE_LABEL, PLAN_LABEL, planInfo, buildSchedule, dayDiff, SCHEMA, TZ, nowParts, today, addDays, normDate, normTime, toMin, fromMin, setWorkDays, isWorkDay, newId, buildDay, buildHistory, dueReminders, morningMessage, reminderMessage };
 });
