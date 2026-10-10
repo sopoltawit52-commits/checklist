@@ -167,6 +167,7 @@ dialog#ppDlg::backdrop{background:rgba(0,0,0,.4)}
 .pp-hist div{margin:3px 0}
 .ppbtn{flex:none;font:inherit;font-size:12px;border:1px solid var(--line);background:var(--card);color:var(--muted);border-radius:8px;padding:3px 8px;cursor:pointer;margin-left:auto;white-space:nowrap}
 .ppbtn:hover{color:var(--warn);border-color:var(--warn)}
+.task.moved{opacity:.75}
 .tag.pp{background:var(--warn-soft);color:var(--warn)}
 .sync{font-size:12px;color:var(--muted);white-space:nowrap;cursor:pointer}
 .sync.err{color:var(--bad)}
@@ -218,6 +219,7 @@ dialog#ppDlg::backdrop{background:rgba(0,0,0,.4)}
       <h2>📋 รายการที่ต้องทำ <span class="sub" id="leftCount"></span></h2>
       <div class="chips" id="ownerFilter"></div>
       <div id="todoList"></div>
+      <details id="movedWrap" class="hidden" open><summary>งานประจำที่เลื่อน/ข้ามวันนี้ (<span id="movedCount"></span>)</summary><div id="movedList"></div></details>
       <details id="upWrap" class="hidden"><summary>งานที่ยังไม่ถึงกำหนด (<span id="upCount"></span>)</summary><div id="upList"></div></details>
     </div>
     <div class="card" id="backlogCard">
@@ -401,13 +403,15 @@ dialog#ppDlg::backdrop{background:rgba(0,0,0,.4)}
 <!-- ===== เลื่อนวัน ===== -->
 <dialog id="ppDlg">
   <form id="ppForm" autocomplete="off">
-    <h3 style="margin:0 0 4px">⏭️ เลื่อนวัน</h3>
+    <h3 style="margin:0 0 4px" id="ppHead">⏭️ เลื่อนวัน</h3>
     <div id="ppTitle" style="font-weight:600;margin-bottom:10px"></div>
     <div class="pp-grid">
-      <div><label>กำหนดเดิม</label><div id="ppFrom" class="pp-from"></div></div>
+      <div><label id="ppFromLbl">กำหนดเดิม</label><div id="ppFrom" class="pp-from"></div></div>
       <div><label>เลื่อนไปวันที่ *</label><input type="date" name="to" required></div>
     </div>
     <div class="chips" id="ppQuick" style="margin-top:8px"><button type="button" class="chip" data-add="1">+1 วัน</button><button type="button" class="chip" data-add="2">+2 วัน</button><button type="button" class="chip" data-add="3">+3 วัน</button><button type="button" class="chip" data-add="7">+1 สัปดาห์</button></div>
+    <label id="ppOccWrap" class="hidden" style="display:flex;gap:6px;align-items:center;color:var(--ink);margin-top:8px"><input type="checkbox" name="skip" style="width:auto"> ข้ามรอบนี้ (ไม่ต้องทำ ไม่นับ KPI)</label>
+    <div id="ppOccNote" class="hidden muted" style="font-size:12px;margin-top:4px">เลื่อนเฉพาะรอบนี้ — รอบปกติครั้งถัดไปยังเหมือนเดิม และนับ KPI ในวันที่เลื่อนไป</div>
     <label id="ppShiftWrap" class="hidden" style="display:flex;gap:6px;align-items:center;color:var(--ink)"><input type="checkbox" name="shift" style="width:auto"> เลื่อนวันเริ่มงานไปด้วยเท่ากัน</label>
     <label style="margin-top:10px">เหตุผลการเลื่อน *</label>
     <div class="chips" id="ppReasons"><button type="button" class="chip">รออะไหล่/วัสดุ</button><button type="button" class="chip">รอผู้รับเหมา/ช่างนอก</button><button type="button" class="chip">ติดงานด่วนอื่น</button><button type="button" class="chip">เครื่องจักรยังหยุดไม่ได้</button><button type="button" class="chip">รออนุมัติ</button><button type="button" class="chip">สภาพอากาศ</button><button type="button" class="chip">คนไม่พอ</button></div>
@@ -417,11 +421,11 @@ dialog#ppDlg::backdrop{background:rgba(0,0,0,.4)}
   </form>
 </dialog>
 
-<script src="config.js?v=11"></script>
-<script src="logic.js?v=11"></script>
-<script src="demo-data.js?v=11"></script>
-<script src="store-browser.js?v=11"></script>
+<script src="config.js?v=12"></script>
+<script src="logic.js?v=12"></script>
+<script src="demo-data.js?v=12"></script>
+<script src="store-browser.js?v=12"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
-<script src="app.js?v=11"></script>
+<script src="app.js?v=12"></script>
 </body>
 </html>

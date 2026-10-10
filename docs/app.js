@@ -106,12 +106,13 @@ function taskRow(t, mode) {
   if (t.priority === 'สูง') tags.push('<span class="tag high">สำคัญสูง</span>');
   if (t.owner) tags.push(`<span>👤 ${esc(L.owners(t).join(', '))}</span>`);
   if (t.category) tags.push(`<span>${catDot(t.category)}${esc(t.category)}</span>`);
-  const pp = L.postpones(t);
+  const pp = t.type === 'daily' ? [] : L.postpones(t);
+  if (t.moved) tags.push(`<span class="tag pp">↪️ เลื่อนมาจาก ${fmtDue(t.moved.from)}${t.moved.reason ? ': ' + esc(t.moved.reason) : ''}</span>`);
   if (pp.length) tags.push(`<span class="tag pp" title="${esc(pp.map(x => `${x.from} → ${x.to}: ${x.reason}`).join('\n'))}">↪️ เลื่อน ${pp.length} ครั้ง${pp[pp.length - 1].reason ? ': ' + esc(pp[pp.length - 1].reason) : ''}</span>`);
   if (mode === 'done') tags.push(`<span class="tag ok">✓ ${esc(t.done_time || '')}${t.done_by ? ' โดย ' + esc(t.done_by) : ''}</span>`);
   const cb = mode === 'up' ? '' : `<button class="cb" aria-label="${mode === 'done' ? 'ยกเลิกเสร็จ' : 'ทำเสร็จ'}" data-id="${t.id}" data-act="${mode === 'done' ? 'undo' : 'done'}"></button>`;
   const prog = t.type === 'plan' && mode !== 'done' && t.state ? `<div class="prog st-${t.state}" title="ใช้เวลาไปแล้ว ${t.timePct}% ของระยะเวลา"><i style="width:${t.timePct}%"></i></div>` : '';
-  const ppb = mode !== 'done' && (t.type === 'once' || t.type === 'plan') ? `<button class="ppbtn" data-pp="${t.id}" title="เลื่อนวัน">⏭️ เลื่อน</button>` : '';
+  const ppb = mode !== 'done' && (t.type === 'once' || t.type === 'plan' || (t.type === 'daily' && mode === 'todo' && t.today && !t.quota)) ? `<button class="ppbtn" data-pp="${t.id}" title="${t.type === 'daily' ? 'เลื่อนหรือข้ามเฉพาะรอบนี้' : 'เลื่อนวัน'}">⏭️ เลื่อน</button>` : '';
   return `<div class="task ${mode === 'done' ? 'done' : ''}">${cb}<div class="body"><div class="title">${esc(t.title)}</div><div class="meta">${tags.join('')}</div>${prog}${t.note ? `<div class="meta">📝 ${esc(t.note)}</div>` : ''}</div>${ppb}</div>`;
 }
 
@@ -152,6 +153,9 @@ async function loadToday() {
   $('#doneCount').textContent = `${done.length} รายการ`;
   $('#todoList').innerHTML = todo.length ? todo.map(t => taskRow(t, 'todo')).join('') : '<div class="empty">🎉 ไม่มีงานค้าง</div>';
   $('#doneList').innerHTML = done.length ? done.map(t => taskRow(t, 'done')).join('') : '<div class="empty">ยังไม่มีงานที่ทำเสร็จวันนี้</div>';
+  const mo = f(d.movedOut);
+  $('#movedWrap').classList.toggle('hidden', !mo.length); $('#movedCount').textContent = mo.length;
+  $('#movedList').innerHTML = mo.map(t => `<div class="task moved"><div class="body"><div class="title">${esc(t.title)}</div><div class="meta"><span class="tag pp">${t.skip ? '⏭️ ข้ามรอบนี้' : '↪️ เลื่อนไป ' + fmtDue(t.move.to)}</span>${t.move.reason ? `<span>💬 ${esc(t.move.reason)}</span>` : ''}${t.move.by ? `<span class="muted">โดย ${esc(t.move.by)}</span>` : ''}${t.owner ? `<span>👤 ${esc(L.owners(t).join(', '))}</span>` : ''}</div></div><button class="ppbtn" data-unmove="${t.id}" title="ยกเลิกการเลื่อน">↩️ ยกเลิก</button></div>`).join('');
   $('#upWrap').classList.toggle('hidden', !up.length); $('#upCount').textContent = up.length;
   $('#upList').innerHTML = up.map(t => taskRow(t, 'up')).join('');
 }
@@ -531,24 +535,43 @@ function openPostpone(id) {
   const t = (DATA.Tasks || []).find(x => x.id === id); if (!t) return;
   ppTask = t;
   const f = $('#ppForm'); f.reset();
-  const cur = L.normDate(t.due_date) || L.today();
+  const occ = t.type === 'daily';
+  const cur = occ ? L.today() : (L.normDate(t.due_date) || L.today());
+  $('#ppHead').textContent = occ ? '⏭️ เลื่อนเฉพาะรอบนี้' : '⏭️ เลื่อนวัน';
+  $('#ppFromLbl').textContent = occ ? 'รอบเดิม' : 'กำหนดเดิม';
+  $('#ppOccWrap').classList.toggle('hidden', !occ);
+  $('#ppOccNote').classList.toggle('hidden', !occ);
+  f.elements['to'].disabled = false;
   $('#ppTitle').textContent = t.title;
   $('#ppFrom').textContent = (t.type === 'plan' ? `${fmtDue(L.normDate(t.start_date) || L.normDate(t.created_at))} – ` : '') + fmtDue(cur) + (t.time ? ' ' + L.normTime(t.time) + ' น.' : '');
   const base = cur < L.today() ? L.today() : cur;
   f.elements['to'].value = L.addDays(base, 1); f.elements['to'].min = L.today();
   $('#ppShiftWrap').classList.toggle('hidden', t.type !== 'plan');
-  const hist = L.postpones(t);
-  $('#ppHist').innerHTML = hist.length ? `<div class="pp-hist"><b>ประวัติการเลื่อน (${hist.length})</b>${hist.map(h => `<div>• ${fmtDue(h.from)} → ${fmtDue(h.to)} — ${esc(h.reason)}${h.by ? ` <span class="muted">(${esc(h.by)})</span>` : ''}</div>`).join('')}</div>` : '';
+  const hist = L.postpones(t).slice(-10);
+  $('#ppHist').innerHTML = hist.length ? `<div class="pp-hist"><b>ประวัติการเลื่อน${occ ? ' (ล่าสุด)' : ''} (${hist.length})</b>${hist.map(h => `<div>• ${fmtDue(h.from)} → ${h.to ? fmtDue(h.to) : 'ข้าม'} — ${esc(h.reason)}${h.by ? ` <span class="muted">(${esc(h.by)})</span>` : ''}</div>`).join('')}</div>` : '';
   $('#ppDlg').showModal();
 }
-$('#ppQuick').addEventListener('click', e => { const b = e.target.closest('[data-add]'); if (!b || !ppTask) return; const cur = L.normDate(ppTask.due_date) || L.today(); const base = cur < L.today() ? L.today() : cur; $('#ppForm').elements['to'].value = L.addDays(base, +b.dataset.add); });
+$('#ppForm').elements['skip'].addEventListener('change', e => { $('#ppForm').elements['to'].disabled = e.target.checked; });
+$('#ppQuick').addEventListener('click', e => { const b = e.target.closest('[data-add]'); if (!b || !ppTask) return; $('#ppForm').elements['skip'].checked = false; $('#ppForm').elements['to'].disabled = false; const cur = ppTask.type === 'daily' ? L.today() : (L.normDate(ppTask.due_date) || L.today()); const base = cur < L.today() ? L.today() : cur; $('#ppForm').elements['to'].value = L.addDays(base, +b.dataset.add); });
 $('#ppReasons').addEventListener('click', e => { const b = e.target.closest('.chip'); if (!b) return; const ta = $('#ppForm').elements['reason']; ta.value = ta.value.trim() ? ta.value.trim() + ', ' + b.textContent : b.textContent; ta.focus(); });
 $('#ppCancel').onclick = () => $('#ppDlg').close();
 $('#ppForm').addEventListener('submit', async e => {
   e.preventDefault();
   const f = e.target, t = ppTask; if (!t) return;
-  const to = f.elements['to'].value, reason = f.elements['reason'].value.trim();
-  if (!to || !reason) return toast('กรุณาใส่วันที่และเหตุผล');
+  const occ = t.type === 'daily', skip = occ && f.elements['skip'].checked;
+  const to = skip ? '' : f.elements['to'].value, reason = f.elements['reason'].value.trim();
+  if ((!to && !skip) || !reason) return toast('กรุณาใส่วันที่และเหตุผล');
+  if (occ) { // งานประจำ: เลื่อน/ข้ามเฉพาะรอบวันนี้ รอบปกติยังเหมือนเดิม
+    const from = L.today();
+    if (to === from) return toast('วันที่ใหม่ต้องไม่ใช่วันเดิม');
+    if (!ME) askName();
+    const n = L.nowParts();
+    const log = [...L.postpones(t), { at: `${n.date} ${n.time.slice(0, 5)}`, by: ME, from, to, reason }].slice(-60);
+    const btn = $('#ppSave'); btn.disabled = true;
+    try { await write([{ action: 'update', tab: 'Tasks', keyField: 'id', key: t.id, patch: { postpone_log: JSON.stringify(log) } }]); $('#ppDlg').close(); toast(skip ? '✔ ข้ามรอบนี้แล้ว' : `✔ เลื่อนรอบนี้ไป ${fmtDue(to)} แล้ว`); rerender(); }
+    catch (err) { toast('ผิดพลาด: ' + err.message); }
+    btn.disabled = false; return;
+  }
   const from = L.normDate(t.due_date);
   if (to === from) return toast('วันที่ใหม่ต้องไม่ใช่วันเดิม');
   if (!ME) askName();
@@ -566,6 +589,19 @@ $('#ppForm').addEventListener('submit', async e => {
   btn.disabled = false;
 });
 document.addEventListener('click', e => { const b = e.target.closest('[data-pp]'); if (b) { e.preventDefault(); openPostpone(b.dataset.pp); } });
+// ยกเลิกการเลื่อน/ข้ามรอบของงานประจำ (ลบรายการล่าสุดที่เลื่อนออกจากวันนี้)
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-unmove]'); if (!b) return;
+  e.preventDefault();
+  const t = (DATA.Tasks || []).find(x => x.id === b.dataset.unmove); if (!t) return;
+  const log = L.postpones(t), d = L.today();
+  let i = -1; for (let k = log.length - 1; k >= 0; k--) if (log[k].from === d) { i = k; break; }
+  if (i < 0) return;
+  if (!confirm(`ยกเลิกการเลื่อน "${t.title}" ให้กลับมาทำวันนี้?`)) return;
+  log.splice(i, 1);
+  try { await write([{ action: 'update', tab: 'Tasks', keyField: 'id', key: t.id, patch: { postpone_log: JSON.stringify(log) } }]); toast('✔ กลับมาเป็นงานวันนี้แล้ว'); rerender(); }
+  catch (err) { toast('ผิดพลาด: ' + err.message); }
+});
 
 // ปุ่มบังคับส่งเข้า LINE (มีเฉพาะเมื่อใช้ Supabase)
 document.querySelectorAll('.lineRow').forEach(el => el.classList.toggle('hidden', !store.sendLine));
